@@ -1,0 +1,1200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Air Pistol Sight Trainer v4</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #000; color: #fff; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+
+  #app { position: fixed; inset: 0; }
+
+  #video, #freezeCanvas {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    object-fit: cover;
+    background: #000;
+    touch-action: none;
+  }
+  #freezeCanvas { display: none; }
+
+  #sightOverlay {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    pointer-events: none;
+  }
+
+  #flash {
+    position: absolute; inset: 0;
+    background: #fff;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.08s;
+  }
+  #flash.on { opacity: 0.65; }
+
+  /* Top HUD */
+  .hud-top {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    padding: calc(env(safe-area-inset-top, 0px) + 10px) 12px 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 6px;
+    background: linear-gradient(to bottom, rgba(0,0,0,0.55), transparent);
+    z-index: 10;
+  }
+  .hud-left { display: flex; gap: 6px; flex-wrap: wrap; max-width: 68%; }
+  .hud-right { display: flex; gap: 5px; flex-shrink: 0; }
+  .pill {
+    background: rgba(0,0,0,0.55);
+    border: 1px solid rgba(255,255,255,0.12);
+    padding: 7px 10px;
+    border-radius: 9px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1.1px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+  }
+  .pill-value { color: #ff4136; font-size: 14px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .pill.pitch .pill-value { min-width: 42px; text-align: center; }
+  .pill.pitch.hot .pill-value { color: #ffcc00; }
+  .pill.pitch.cool .pill-value { color: #55ff88; }
+  .pill.avg .pill-value { color: #55ff88; min-width: 34px; text-align: center; }
+  .pill.zoom { cursor: pointer; }
+  .pill.zoom .pill-value { color: #ffffff; min-width: 36px; text-align: center; }
+  .pill.zoom:active { background: rgba(255,255,255,0.1); }
+
+  .hud-btn {
+    width: 38px; height: 38px;
+    border-radius: 50%;
+    background: rgba(0,0,0,0.55);
+    border: 1px solid rgba(255,255,255,0.15);
+    color: #fff;
+    font-size: 17px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s, border-color 0.15s;
+    flex-shrink: 0;
+  }
+  .hud-btn:active { background: rgba(255,255,255,0.18); }
+  .hud-btn.ok-flash { background: #3cbe5a; border-color: #3cbe5a; }
+
+  /* Zoom indicator that appears transiently on pinch */
+  #zoomBubble {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) scale(0.9);
+    background: rgba(0,0,0,0.75);
+    border: 2px solid rgba(255,255,255,0.3);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    padding: 20px 34px;
+    border-radius: 50px;
+    font-size: 34px;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+    font-variant-numeric: tabular-nums;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s, transform 0.2s;
+    z-index: 20;
+  }
+  #zoomBubble.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+
+  /* Fire button */
+  #fireBtn {
+    position: absolute;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 28px);
+    left: 50%;
+    transform: translateX(-50%);
+    width: 92px; height: 92px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #ff6055, #b81414);
+    border: 3px solid rgba(255,255,255,0.92);
+    color: #fff;
+    font-size: 14px;
+    font-weight: 800;
+    letter-spacing: 2px;
+    box-shadow: 0 6px 22px rgba(0,0,0,0.55), inset 0 -4px 12px rgba(0,0,0,0.35);
+    cursor: pointer;
+    transition: transform 0.05s;
+    z-index: 10;
+    touch-action: manipulation;
+  }
+  #fireBtn:active { transform: translateX(-50%) scale(0.93); }
+  #fireBtn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+  /* Unscored shot-release badge (fallback when pitch isn't available) */
+  #replayLabel {
+    position: absolute;
+    top: 14%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(255, 65, 54, 0.95);
+    color: white;
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 2.5px;
+    display: none;
+    z-index: 15;
+    box-shadow: 0 4px 14px rgba(255,65,54,0.5);
+  }
+  #replayLabel.show { display: block; animation: pulse 0.4s ease; }
+  @keyframes pulse {
+    0% { transform: translateX(-50%) scale(0.7); opacity: 0; }
+    100% { transform: translateX(-50%) scale(1); opacity: 1; }
+  }
+
+  /* Scored shot result panel */
+  #shotResult {
+    position: absolute;
+    top: 13%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0,0,0,0.78);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    padding: 16px 26px 14px;
+    border-radius: 14px;
+    text-align: center;
+    display: none;
+    z-index: 15;
+    border: 2px solid rgba(255,255,255,0.1);
+    min-width: 170px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  }
+  #shotResult.show { display: block; animation: resultPop 0.35s cubic-bezier(.3,.8,.2,1.1); }
+  @keyframes resultPop {
+    0% { transform: translateX(-50%) scale(0.55); opacity: 0; }
+    100% { transform: translateX(-50%) scale(1); opacity: 1; }
+  }
+  .shot-score {
+    font-size: 52px;
+    font-weight: 900;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+    margin-bottom: 4px;
+    color: #fff;
+    letter-spacing: -1px;
+  }
+  .shot-grade {
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 3px;
+    margin-bottom: 6px;
+    opacity: 0.95;
+  }
+  .shot-deviation {
+    font-size: 11px;
+    opacity: 0.7;
+    letter-spacing: 0.4px;
+    font-weight: 500;
+  }
+  .shot-deviation b { font-weight: 700; opacity: 1; }
+  #shotResult.grade-excellent { border-color: rgba(85,255,136,0.6); }
+  #shotResult.grade-excellent .shot-score,
+  #shotResult.grade-excellent .shot-grade { color: #55ff88; }
+  #shotResult.grade-good { border-color: rgba(168,224,85,0.6); }
+  #shotResult.grade-good .shot-score,
+  #shotResult.grade-good .shot-grade { color: #a8e055; }
+  #shotResult.grade-fair { border-color: rgba(255,204,0,0.6); }
+  #shotResult.grade-fair .shot-score,
+  #shotResult.grade-fair .shot-grade { color: #ffcc00; }
+  #shotResult.grade-poor { border-color: rgba(255,136,51,0.6); }
+  #shotResult.grade-poor .shot-score,
+  #shotResult.grade-poor .shot-grade { color: #ff8833; }
+  #shotResult.grade-miss { border-color: rgba(255,65,54,0.6); }
+  #shotResult.grade-miss .shot-score,
+  #shotResult.grade-miss .shot-grade { color: #ff4136; }
+
+  /* Start screen */
+  #startScreen {
+    position: absolute; inset: 0;
+    background: #0a0a0a;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    padding: 24px;
+    text-align: center;
+  }
+  .logo {
+    font-size: 11px;
+    letter-spacing: 5px;
+    opacity: 0.45;
+    margin-bottom: 10px;
+    font-weight: 600;
+  }
+  .title {
+    font-size: 30px;
+    font-weight: 800;
+    margin-bottom: 10px;
+    letter-spacing: -0.5px;
+    background: linear-gradient(180deg, #fff, #999);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .version { font-size: 11px; color: #ff4136; letter-spacing: 2px; font-weight: 700; margin-bottom: 14px; }
+  .subtitle {
+    font-size: 15px;
+    opacity: 0.65;
+    margin-bottom: 38px;
+    max-width: 320px;
+    line-height: 1.45;
+  }
+  .start-btn {
+    background: linear-gradient(180deg, #ff4136, #c01414);
+    color: white;
+    border: none;
+    padding: 16px 44px;
+    font-size: 15px;
+    font-weight: 800;
+    border-radius: 30px;
+    letter-spacing: 1.5px;
+    cursor: pointer;
+    box-shadow: 0 6px 18px rgba(255,65,54,0.35);
+  }
+  .instructions {
+    margin-top: 36px;
+    font-size: 12px;
+    opacity: 0.55;
+    max-width: 320px;
+    line-height: 1.7;
+  }
+  .instructions b { color: #ff4136; opacity: 1; }
+  #errorMsg {
+    color: #ff6b6b;
+    font-size: 13px;
+    margin-top: 18px;
+    max-width: 320px;
+    line-height: 1.4;
+  }
+
+  /* Settings panel */
+  #settings {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    background: rgba(12,12,14,0.97);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    transform: translateY(100%);
+    transition: transform 0.3s cubic-bezier(.2,.8,.2,1);
+    padding: 18px 20px calc(env(safe-area-inset-bottom, 0px) + 20px);
+    z-index: 50;
+    max-height: 82vh;
+    overflow-y: auto;
+    border-top: 1px solid rgba(255,255,255,0.08);
+    border-radius: 18px 18px 0 0;
+  }
+  #settings.open { transform: translateY(0); }
+  .settings-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 18px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+  .settings-title { font-size: 17px; font-weight: 700; letter-spacing: 0.3px; }
+  .close-btn {
+    background: rgba(255,255,255,0.08);
+    border: none;
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    color: #fff;
+    font-size: 18px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .setting-row { margin-bottom: 16px; }
+  .setting-label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    margin-bottom: 8px;
+    opacity: 0.85;
+    letter-spacing: 0.3px;
+  }
+  .setting-label .val { opacity: 1; font-weight: 700; color: #ff4136; font-variant-numeric: tabular-nums; }
+  input[type=range] {
+    width: 100%;
+    -webkit-appearance: none;
+    height: 4px;
+    background: rgba(255,255,255,0.12);
+    border-radius: 2px;
+    outline: none;
+  }
+  input[type=range]:disabled { opacity: 0.3; }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 22px; height: 22px;
+    background: #ff4136;
+    border-radius: 50%;
+    cursor: pointer;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+  }
+  input[type=range]::-moz-range-thumb {
+    width: 22px; height: 22px;
+    background: #ff4136;
+    border-radius: 50%;
+    border: none;
+    cursor: pointer;
+  }
+  .toggle-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 0;
+    font-size: 13px;
+    margin-bottom: 6px;
+  }
+  .switch { position: relative; display: inline-block; width: 46px; height: 26px; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .slider-sw {
+    position: absolute; cursor: pointer;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(255,255,255,0.15);
+    border-radius: 26px;
+    transition: 0.25s;
+  }
+  .slider-sw::before {
+    position: absolute; content: "";
+    height: 20px; width: 20px;
+    left: 3px; top: 3px;
+    background: white;
+    border-radius: 50%;
+    transition: 0.25s;
+  }
+  .switch input:checked + .slider-sw { background: #ff4136; }
+  .switch input:checked + .slider-sw::before { transform: translateX(20px); }
+
+  .btn-secondary {
+    width: 100%;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.12);
+    color: #fff;
+    padding: 12px;
+    border-radius: 10px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    margin-top: 6px;
+    letter-spacing: 0.5px;
+  }
+  .btn-secondary:active { background: rgba(255,255,255,0.12); }
+  .btn-primary {
+    width: 100%;
+    background: linear-gradient(180deg, #ff4136, #c01414);
+    border: none;
+    color: #fff;
+    padding: 13px;
+    border-radius: 10px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    letter-spacing: 1px;
+    margin-bottom: 8px;
+  }
+  .section-title {
+    font-size: 10px;
+    letter-spacing: 2px;
+    opacity: 0.5;
+    margin: 12px 0 10px;
+    font-weight: 700;
+  }
+  .help-text {
+    font-size: 11px;
+    opacity: 0.55;
+    line-height: 1.5;
+    margin-top: -4px;
+    margin-bottom: 12px;
+  }
+  .preset-row { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+  .preset-btn {
+    flex: 1;
+    min-width: 60px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.12);
+    color: #fff;
+    padding: 10px 8px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.3px;
+  }
+  .preset-btn:active { background: rgba(255,255,255,0.14); }
+  .preset-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+  .status-badge {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 6px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    margin-left: 8px;
+  }
+  .status-badge.ok { background: rgba(85,255,136,0.15); color: #55ff88; }
+  .status-badge.no { background: rgba(255,65,54,0.15); color: #ff8877; }
+</style>
+</head>
+<body>
+<div id="app">
+  <video id="video" autoplay playsinline muted></video>
+  <canvas id="freezeCanvas"></canvas>
+  <svg id="sightOverlay" preserveAspectRatio="none"></svg>
+  <div id="flash"></div>
+  <div id="zoomBubble">1.0×</div>
+
+  <div id="replayLabel">SHOT RELEASE</div>
+  <div id="shotResult">
+    <div class="shot-score" id="shotScore">—</div>
+    <div class="shot-grade" id="shotGrade">—</div>
+    <div class="shot-deviation" id="shotDeviation">—</div>
+  </div>
+
+  <div class="hud-top">
+    <div class="hud-left">
+      <div class="pill"><span>SHOTS</span><span class="pill-value" id="counter">0</span></div>
+      <div class="pill avg" id="avgPill" style="display:none"><span>AVG</span><span class="pill-value" id="avgValue">—</span></div>
+      <div class="pill pitch" id="pitchPill"><span>PITCH</span><span class="pill-value" id="pitchValue">—</span></div>
+      <div class="pill zoom" id="zoomPill" style="display:none"><span>ZOOM</span><span class="pill-value" id="zoomValue">1.0×</span></div>
+    </div>
+    <div class="hud-right">
+      <button class="hud-btn" id="calibrateBtn" title="Calibrate level">⊕</button>
+      <button class="hud-btn" id="resetBtn" title="Reset session">↺</button>
+      <button class="hud-btn" id="settingsBtn" title="Sight settings">⚙</button>
+    </div>
+  </div>
+
+  <button id="fireBtn" disabled>FIRE</button>
+
+  <div id="settings">
+    <div class="settings-header">
+      <div class="settings-title">Settings</div>
+      <button class="close-btn" id="closeSettings">×</button>
+    </div>
+
+    <div class="section-title">
+      ZOOM
+      <span class="status-badge ok" id="zoomSupportedBadge" style="display:none">SUPPORTED</span>
+      <span class="status-badge no" id="zoomUnsupportedBadge" style="display:none">NOT AVAILABLE</span>
+    </div>
+    <div class="setting-row">
+      <div class="setting-label">Camera zoom <span class="val" id="zoomSliderVal">1.0×</span></div>
+      <input type="range" id="zoomSlider" min="1" max="1" step="0.1" value="1" disabled>
+    </div>
+    <div class="preset-row" id="zoomPresets"></div>
+    <div class="help-text" id="zoomHelp">Pinch the camera view with two fingers to zoom, or use the slider. Zoom helps you see the target while keeping the sights readable.</div>
+
+    <div class="section-title">PITCH &amp; CALIBRATION</div>
+    <button class="btn-primary" id="calibrateBtn2">⊕ CALIBRATE LEVEL NOW</button>
+    <div class="help-text">Hold the phone exactly as you'd hold the pistol at the moment of release, then tap to zero the pitch reference.</div>
+
+    <div class="toggle-row">
+      <span>Enable pitch simulation &amp; scoring</span>
+      <label class="switch"><input type="checkbox" id="pitchEnabled" checked><span class="slider-sw"></span></label>
+    </div>
+
+    <div class="setting-row">
+      <div class="setting-label">Sight radius (pistol length) <span class="val" id="sightRadiusVal">36 cm</span></div>
+      <input type="range" id="sightRadius" min="15" max="60" value="36" step="1">
+    </div>
+    <div class="help-text">Distance between rear and front sight. Longer radius = more visible pitch effect on the sights. Scoring always uses 10 m target distance with a 4.5 mm pellet.</div>
+
+    <div class="section-title">POSITION</div>
+    <div class="setting-row">
+      <div class="setting-label">Vertical position <span class="val" id="vPosVal">55%</span></div>
+      <input type="range" id="vPos" min="25" max="85" value="55">
+    </div>
+    <div class="setting-row">
+      <div class="setting-label">Horizontal offset <span class="val" id="hPosVal">0</span></div>
+      <input type="range" id="hPos" min="-15" max="15" value="0">
+    </div>
+
+    <div class="section-title">REAR SIGHT (U)</div>
+    <div class="setting-row">
+      <div class="setting-label">Width <span class="val" id="rearWVal">36</span></div>
+      <input type="range" id="rearW" min="18" max="60" value="36">
+    </div>
+    <div class="setting-row">
+      <div class="setting-label">Total height <span class="val" id="rearHVal">9</span></div>
+      <input type="range" id="rearH" min="4" max="16" value="9">
+    </div>
+    <div class="setting-row">
+      <div class="setting-label">Notch width <span class="val" id="notchWVal">7</span></div>
+      <input type="range" id="notchW" min="3" max="14" value="7">
+    </div>
+    <div class="setting-row">
+      <div class="setting-label">Base height <span class="val" id="baseHVal">2.5</span></div>
+      <input type="range" id="baseH" min="0" max="8" step="0.5" value="2.5">
+    </div>
+
+    <div class="section-title">FRONT SIGHT</div>
+    <div class="setting-row">
+      <div class="setting-label">Width <span class="val" id="frontWVal">5</span></div>
+      <input type="range" id="frontW" min="2" max="12" value="5">
+    </div>
+    <div class="setting-row">
+      <div class="setting-label">Height <span class="val" id="frontHVal">6</span></div>
+      <input type="range" id="frontH" min="2" max="14" value="6">
+    </div>
+
+    <div class="section-title">APPEARANCE</div>
+    <div class="setting-row">
+      <div class="setting-label">Opacity <span class="val" id="opacityVal">100%</span></div>
+      <input type="range" id="opacity" min="30" max="100" value="100">
+    </div>
+
+    <button class="btn-secondary" id="resetSights">Reset to defaults</button>
+  </div>
+
+  <div id="startScreen">
+    <div class="logo">▪ AIR PISTOL TRAINER ▪</div>
+    <div class="title">Sight Picture Training</div>
+    <div class="version">v4 · CAMERA ZOOM</div>
+    <div class="subtitle">Zoom in on your target while keeping the sights readable.</div>
+    <button class="start-btn" id="startBtn">START CAMERA</button>
+    <div class="instructions">
+      Aim camera at target, then <b>pinch</b> to zoom.<br>
+      Align <b>front post</b> in the <b>U-notch</b>.<br>
+      Tap <b>⊕</b> to calibrate level in your stance.<br>
+      Tap <b>FIRE</b> at release for scored shot feedback.
+    </div>
+    <div id="errorMsg"></div>
+  </div>
+</div>
+
+<script>
+  // ===== Constants =====
+  const TARGET_DISTANCE_MM = 10000;
+  const PELLET_RADIUS_MM = 2.25;
+  const RING_10_RADIUS_MM = 5.75;
+  const RING_STEP_MM = 8;
+  const REPLAY_DURATION_MS = 1900;
+
+  // ===== Config & state =====
+  const defaults = {
+    vPos: 55, hPos: 0,
+    rearW: 36, rearH: 9, notchW: 7, baseH: 2.5,
+    frontW: 5, frontH: 6,
+    opacity: 100,
+    sightRadius: 36,
+    pitchEnabled: true
+  };
+  let config = { ...defaults };
+
+  let stream = null;
+  let videoTrack = null;
+  let shotCount = 0;
+  let sessionShots = [];
+  let audioCtx = null;
+  let isReplaying = false;
+
+  // Orientation state
+  let zeroBeta = null;
+  let rawBeta = null;
+  let smoothedBeta = null;
+  let orientationAttached = false;
+
+  // Zoom state
+  let zoomCaps = null;      // { min, max, step } or null
+  let currentZoom = 1;
+  let zoomApplying = false;
+  let pendingZoom = null;
+  let zoomBubbleTimer = null;
+
+  // Pinch state
+  let pinchStartDist = null;
+  let pinchStartZoom = null;
+
+  // ===== DOM refs =====
+  const video = document.getElementById('video');
+  const canvas = document.getElementById('freezeCanvas');
+  const ctx = canvas.getContext('2d');
+  const svg = document.getElementById('sightOverlay');
+  const flash = document.getElementById('flash');
+  const counterEl = document.getElementById('counter');
+  const avgPillEl = document.getElementById('avgPill');
+  const avgValueEl = document.getElementById('avgValue');
+  const replayLabel = document.getElementById('replayLabel');
+  const shotResultEl = document.getElementById('shotResult');
+  const shotScoreEl = document.getElementById('shotScore');
+  const shotGradeEl = document.getElementById('shotGrade');
+  const shotDeviationEl = document.getElementById('shotDeviation');
+  const fireBtn = document.getElementById('fireBtn');
+  const pitchValueEl = document.getElementById('pitchValue');
+  const pitchPillEl = document.getElementById('pitchPill');
+  const zoomPill = document.getElementById('zoomPill');
+  const zoomValueEl = document.getElementById('zoomValue');
+  const zoomSlider = document.getElementById('zoomSlider');
+  const zoomSliderVal = document.getElementById('zoomSliderVal');
+  const zoomPresets = document.getElementById('zoomPresets');
+  const zoomBubble = document.getElementById('zoomBubble');
+
+  // ===== Scoring =====
+
+  function computeShotFromPitch(pitchDelta_deg) {
+    const clampedPitch = Math.max(-45, Math.min(45, pitchDelta_deg));
+    const pitchRad = clampedPitch * Math.PI / 180;
+    const errorMm = Math.tan(pitchRad) * TARGET_DISTANCE_MM;
+    const absError = Math.abs(errorMm);
+
+    const dAdj = Math.max(0, absError - PELLET_RADIUS_MM);
+
+    let score;
+    if (dAdj <= 0) {
+      score = 10.9;
+    } else if (dAdj <= RING_10_RADIUS_MM) {
+      score = 10.9 - (dAdj / RING_10_RADIUS_MM) * 0.9;
+    } else {
+      const outside = dAdj - RING_10_RADIUS_MM;
+      score = 10.0 - outside / RING_STEP_MM;
+    }
+    score = Math.max(0, score);
+
+    let grade;
+    if (score >= 10.0) grade = 'EXCELLENT';
+    else if (score >= 9.0) grade = 'GOOD';
+    else if (score >= 7.0) grade = 'FAIR';
+    else if (score >= 3.0) grade = 'POOR';
+    else grade = 'MISS';
+
+    return {
+      pitchDelta: pitchDelta_deg,
+      errorMm: errorMm,
+      score: score,
+      grade: grade,
+      direction: errorMm >= 0 ? 'HIGH' : 'LOW'
+    };
+  }
+
+  function showShotResult(shot) {
+    shotScoreEl.textContent = shot.score.toFixed(1);
+    shotGradeEl.textContent = shot.grade;
+    const absErr = Math.abs(shot.errorMm);
+    if (absErr < 0.5) {
+      shotDeviationEl.innerHTML = '<b>DEAD CENTER</b> at 10 m';
+    } else {
+      shotDeviationEl.innerHTML = '<b>' + absErr.toFixed(1) + ' mm ' + shot.direction + '</b> at 10 m';
+    }
+    shotResultEl.className = 'show grade-' + shot.grade.toLowerCase();
+    void shotResultEl.offsetWidth;
+  }
+
+  function hideShotResult() {
+    shotResultEl.className = '';
+  }
+
+  function updateSessionStats() {
+    if (sessionShots.length === 0) {
+      avgPillEl.style.display = 'none';
+      return;
+    }
+    const total = sessionShots.reduce((s, x) => s + x.score, 0);
+    const avg = total / sessionShots.length;
+    avgValueEl.textContent = avg.toFixed(2);
+    avgPillEl.style.display = '';
+  }
+
+  // ===== Sight rendering =====
+
+  function getPitchDelta() {
+    if (!config.pitchEnabled) return 0;
+    if (zeroBeta === null || smoothedBeta === null) return 0;
+    return smoothedBeta - zeroBeta;
+  }
+
+  function isPitchLive() {
+    return config.pitchEnabled && zeroBeta !== null && smoothedBeta !== null;
+  }
+
+  function drawSights() {
+    const w = svg.clientWidth;
+    const h = svg.clientHeight;
+    if (!w || !h) return;
+
+    const cx = w / 2 + (config.hPos / 100) * w;
+    const cy = (config.vPos / 100) * h;
+
+    const rearW  = (config.rearW  / 100) * w;
+    const rearH  = (config.rearH  / 100) * h;
+    const notchW = (config.notchW / 100) * w;
+    let   baseH  = (config.baseH  / 100) * h;
+    const frontW = (config.frontW / 100) * w;
+    const frontH = (config.frontH / 100) * h;
+
+    const effNotchW = Math.min(notchW, rearW - 6);
+    baseH = Math.max(0, Math.min(baseH, rearH - 2));
+
+    const topY     = cy;
+    const bottomY  = topY + rearH;
+    const baseTopY = bottomY - baseH;
+
+    const pitchDeltaDeg = getPitchDelta();
+    const pitchPerDeg = 0.03 * (config.sightRadius / 36) * h;
+    const frontOffsetY = -pitchDeltaDeg * pitchPerDeg;
+
+    const rearPath = [
+      `M ${cx - rearW/2} ${topY}`,
+      `L ${cx - effNotchW/2} ${topY}`,
+      `L ${cx - effNotchW/2} ${baseTopY}`,
+      `L ${cx + effNotchW/2} ${baseTopY}`,
+      `L ${cx + effNotchW/2} ${topY}`,
+      `L ${cx + rearW/2} ${topY}`,
+      `L ${cx + rearW/2} ${bottomY}`,
+      `L ${cx - rearW/2} ${bottomY}`,
+      'Z'
+    ].join(' ');
+
+    const frontX = cx - frontW/2;
+    const frontTopY = topY + frontOffsetY;
+    const op = config.opacity / 100;
+
+    svg.innerHTML = `
+      <g opacity="${op}">
+        <path d="${rearPath}"
+              fill="#000"
+              stroke="rgba(255,255,255,0.55)"
+              stroke-width="2"
+              stroke-linejoin="miter"/>
+        <rect x="${frontX}" y="${frontTopY}"
+              width="${frontW}" height="${frontH}"
+              fill="#000"
+              stroke="rgba(255,255,255,0.55)"
+              stroke-width="2"/>
+      </g>
+    `;
+  }
+
+  function setupResize() {
+    if (window.ResizeObserver) {
+      new ResizeObserver(drawSights).observe(svg);
+    }
+    window.addEventListener('resize', drawSights);
+    window.addEventListener('orientationchange', () => setTimeout(drawSights, 200));
+  }
+
+  // ===== Camera =====
+
+  async function startCamera() {
+    document.getElementById('errorMsg').textContent = '';
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: 'environment' },
+          width:  { ideal: 1920 },
+          height: { ideal: 1080 }
+        },
+        audio: false
+      });
+      video.srcObject = stream;
+      await video.play();
+
+      videoTrack = stream.getVideoTracks()[0];
+      initZoom();
+
+      document.getElementById('startScreen').style.display = 'none';
+      fireBtn.disabled = false;
+      setTimeout(drawSights, 100);
+      attachOrientation();
+    } catch (err) {
+      const msg = (err && err.message) ? err.message : String(err);
+      document.getElementById('errorMsg').textContent =
+        'Unable to access camera: ' + msg + ' — please grant camera permission and use an HTTPS (or local file://) connection.';
+    }
+  }
+
+  // ===== Zoom =====
+
+  function initZoom() {
+    zoomCaps = null;
+    currentZoom = 1;
+    const supBadge = document.getElementById('zoomSupportedBadge');
+    const noBadge  = document.getElementById('zoomUnsupportedBadge');
+
+    if (!videoTrack || typeof videoTrack.getCapabilities !== 'function') {
+      noBadge.style.display = 'inline-block';
+      zoomSlider.disabled = true;
+      return;
+    }
+
+    const caps = videoTrack.getCapabilities();
+    if (!caps || !caps.zoom ||
+        typeof caps.zoom.min !== 'number' || typeof caps.zoom.max !== 'number' ||
+        caps.zoom.max <= caps.zoom.min) {
+      noBadge.style.display = 'inline-block';
+      zoomSlider.disabled = true;
+      return;
+    }
+
+    zoomCaps = {
+      min: caps.zoom.min,
+      max: caps.zoom.max,
+      step: caps.zoom.step || 0.1
+    };
+    const settings = videoTrack.getSettings();
+    currentZoom = (typeof settings.zoom === 'number') ? settings.zoom : zoomCaps.min;
+
+    // HUD pill
+    zoomPill.style.display = '';
+    // Settings slider
+    zoomSlider.min  = String(zoomCaps.min);
+    zoomSlider.max  = String(zoomCaps.max);
+    zoomSlider.step = String(zoomCaps.step);
+    zoomSlider.value = String(currentZoom);
+    zoomSlider.disabled = false;
+    supBadge.style.display = 'inline-block';
+
+    // Build presets: always 1x, plus 2x if in range, then max if > 3x
+    buildZoomPresets();
+
+    updateZoomDisplay(false);
+  }
+
+  function buildZoomPresets() {
+    zoomPresets.innerHTML = '';
+    if (!zoomCaps) return;
+
+    const candidates = new Set();
+    // Always include min (usually 1.0)
+    candidates.add(roundTo(zoomCaps.min, zoomCaps.step));
+    [2, 3, 5].forEach(v => {
+      if (v > zoomCaps.min && v < zoomCaps.max) candidates.add(v);
+    });
+    candidates.add(roundTo(zoomCaps.max, zoomCaps.step));
+
+    const sorted = [...candidates].sort((a, b) => a - b);
+    sorted.forEach(v => {
+      const btn = document.createElement('button');
+      btn.className = 'preset-btn';
+      btn.textContent = formatZoom(v);
+      btn.addEventListener('click', () => applyZoom(v));
+      zoomPresets.appendChild(btn);
+    });
+  }
+
+  function roundTo(value, step) {
+    if (!step) return value;
+    return Math.round(value / step) * step;
+  }
+
+  function formatZoom(v) {
+    return v.toFixed(v < 10 ? 1 : 0) + '×';
+  }
+
+  async function applyZoom(value) {
+    if (!videoTrack || !zoomCaps) return;
+    value = Math.max(zoomCaps.min, Math.min(zoomCaps.max, value));
+    currentZoom = value;
+    updateZoomDisplay(true);
+
+    if (zoomApplying) {
+      pendingZoom = value;
+      return;
+    }
+    zoomApplying = true;
+    try {
+      await videoTrack.applyConstraints({ advanced: [{ zoom: value }] });
+    } catch (e) {
+      console.warn('applyConstraints(zoom) failed:', e);
+    }
+    zoomApplying = false;
+    if (pendingZoom !== null && pendingZoom !== value) {
+      const p = pendingZoom;
+      pendingZoom = null;
+      applyZoom(p);
+    } else {
+      pendingZoom = null;
+    }
+  }
+
+  function updateZoomDisplay(showBubble) {
+    const txt = formatZoom(currentZoom);
+    zoomValueEl.textContent = txt;
+    zoomSliderVal.textContent = txt;
+    zoomSlider.value = String(currentZoom);
+    zoomBubble.textContent = txt;
+
+    if (showBubble && zoomCaps) {
+      zoomBubble.classList.add('show');
+      if (zoomBubbleTimer) clearTimeout(zoomBubbleTimer);
+      zoomBubbleTimer = setTimeout(() => zoomBubble.classList.remove('show'), 800);
+    }
+  }
+
+  function resetZoom() {
+    if (!zoomCaps) return;
+    applyZoom(zoomCaps.min);
+  }
+
+  // ===== Pinch gesture =====
+
+  function touchDistance(touches) {
+    const dx = touches[0].clientX - touches[1].clientX;
+    const dy = touches[0].clientY - touches[1].clientY;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  function onTouchStart(e) {
+    if (!zoomCaps) return;
+    if (e.touches.length === 2) {
+      pinchStartDist = touchDistance(e.touches);
+      pinchStartZoom = currentZoom;
+      e.preventDefault();
+    }
+  }
+
+  function onTouchMove(e) {
+    if (!zoomCaps || pinchStartDist === null) return;
+    if (e.touches.length === 2) {
+      const d = touchDistance(e.touches);
+      if (d <= 0 || pinchStartDist <= 0) return;
+      const ratio = d / pinchStartDist;
+      // Geometric interpolation so pinch feels linear in log-zoom space
+      const zoomRange = Math.log(zoomCaps.max / zoomCaps.min);
+      const logStart = Math.log(pinchStartZoom / zoomCaps.min);
+      const logNew = logStart + Math.log(ratio);
+      let newZoom = zoomCaps.min * Math.exp(Math.min(zoomRange, Math.max(0, logNew)));
+      applyZoom(newZoom);
+      e.preventDefault();
+    }
+  }
+
+  function onTouchEnd(e) {
+    if (e.touches.length < 2) {
+      pinchStartDist = null;
+      pinchStartZoom = null;
+    }
+  }
+
+  // ===== Orientation =====
+
+  async function attachOrientation() {
+    if (orientationAttached) return;
+    try {
+      if (typeof DeviceOrientationEvent !== 'undefined' &&
+          typeof DeviceOrientationEvent.requestPermission === 'function') {
+        const response = await DeviceOrientationEvent.requestPermission();
+        if (response !== 'granted') return;
+      }
+      window.addEventListener('deviceorientation', handleOrientation, true);
+      orientationAttached = true;
+    } catch (e) {
+      console.warn('Device orientation unavailable:', e);
+    }
+  }
+
+  function handleOrientation(event) {
+    if (event.beta === null || event.beta === undefined) return;
+    rawBeta = event.beta;
+    const alpha = 0.35;
+    smoothedBeta = (smoothedBeta === null)
+      ? rawBeta
+      : smoothedBeta * (1 - alpha) + rawBeta * alpha;
+
+    if (zeroBeta === null) zeroBeta = smoothedBeta;
+
+    updatePitchDisplay();
+    drawSights();
+  }
+
+  function updatePitchDisplay() {
+    if (smoothedBeta === null || zeroBeta === null) {
+      pitchValueEl.textContent = '—';
+      pitchPillEl.classList.remove('hot', 'cool');
+      return;
+    }
+    const d = smoothedBeta - zeroBeta;
+    const sign = d >= 0 ? '+' : '';
+    pitchValueEl.textContent = sign + d.toFixed(1) + '°';
+    pitchPillEl.classList.toggle('hot', Math.abs(d) > 2.0);
+    pitchPillEl.classList.toggle('cool', Math.abs(d) < 0.3);
+  }
+
+  function calibrateLevel() {
+    if (smoothedBeta === null) {
+      attachOrientation();
+      return;
+    }
+    zeroBeta = smoothedBeta;
+    updatePitchDisplay();
+    drawSights();
+    ['calibrateBtn','calibrateBtn2'].forEach(id => {
+      const b = document.getElementById(id);
+      if (!b) return;
+      b.classList.add('ok-flash');
+      setTimeout(() => b.classList.remove('ok-flash'), 400);
+    });
+  }
+
+  // ===== Fire / shot =====
+
+  function playClickSound() {
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      const t = audioCtx.currentTime;
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(1400, t);
+      osc.frequency.exponentialRampToValueAtTime(180, t + 0.07);
+      gain.gain.setValueAtTime(0.22, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.09);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start(t);
+      osc.stop(t + 0.1);
+    } catch (e) { /* silent */ }
+  }
+
+  function fire() {
+    if (isReplaying || !stream) return;
+    isReplaying = true;
+
+    const pitchAtFire = isPitchLive() ? (smoothedBeta - zeroBeta) : null;
+    const shot = (pitchAtFire !== null) ? computeShotFromPitch(pitchAtFire) : null;
+
+    const vw = video.videoWidth, vh = video.videoHeight;
+    if (vw && vh) {
+      canvas.width = vw;
+      canvas.height = vh;
+      ctx.drawImage(video, 0, 0, vw, vh);
+      canvas.style.display = 'block';
+    }
+
+    flash.classList.add('on');
+    setTimeout(() => flash.classList.remove('on'), 90);
+
+    playClickSound();
+    if (navigator.vibrate) navigator.vibrate(30);
+
+    shotCount++;
+    counterEl.textContent = shotCount;
+
+    if (shot) {
+      sessionShots.push(shot);
+      updateSessionStats();
+      showShotResult(shot);
+    } else {
+      replayLabel.classList.add('show');
+    }
+
+    setTimeout(() => {
+      canvas.style.display = 'none';
+      replayLabel.classList.remove('show');
+      hideShotResult();
+      isReplaying = false;
+    }, REPLAY_DURATION_MS);
+  }
+
+  function resetSession() {
+    shotCount = 0;
+    sessionShots = [];
+    counterEl.textContent = 0;
+    updateSessionStats();
+  }
+
+  // ===== Settings =====
+
+  function updateValLabel(key, val, el) {
+    if (key === 'vPos' || key === 'opacity') el.textContent = val + '%';
+    else if (key === 'hPos') el.textContent = val > 0 ? '+' + val : String(val);
+    else if (key === 'sightRadius') el.textContent = val + ' cm';
+    else el.textContent = val;
+  }
+
+  function bindSettings() {
+    const rangeFields = ['vPos','hPos','rearW','rearH','notchW','baseH','frontW','frontH','opacity','sightRadius'];
+    rangeFields.forEach(key => {
+      const el = document.getElementById(key);
+      const valEl = document.getElementById(key + 'Val');
+      el.value = config[key];
+      updateValLabel(key, config[key], valEl);
+      el.oninput = () => {
+        config[key] = parseFloat(el.value);
+        updateValLabel(key, config[key], valEl);
+        drawSights();
+      };
+    });
+    const pitchToggle = document.getElementById('pitchEnabled');
+    pitchToggle.checked = config.pitchEnabled;
+    pitchToggle.onchange = () => {
+      config.pitchEnabled = pitchToggle.checked;
+      drawSights();
+    };
+  }
+
+  function resetSights() {
+    config = { ...defaults };
+    bindSettings();
+    drawSights();
+  }
+
+  // ===== Events =====
+
+  document.getElementById('startBtn').addEventListener('click', startCamera);
+  fireBtn.addEventListener('click', fire);
+  document.getElementById('settingsBtn').addEventListener('click', () => {
+    document.getElementById('settings').classList.add('open');
+  });
+  document.getElementById('closeSettings').addEventListener('click', () => {
+    document.getElementById('settings').classList.remove('open');
+  });
+  document.getElementById('resetBtn').addEventListener('click', () => {
+    if (shotCount === 0) return;
+    if (confirm('Reset session (shot counter and average) to zero?')) {
+      resetSession();
+    }
+  });
+  document.getElementById('resetSights').addEventListener('click', resetSights);
+  document.getElementById('calibrateBtn').addEventListener('click', calibrateLevel);
+  document.getElementById('calibrateBtn2').addEventListener('click', calibrateLevel);
+
+  // Zoom UI
+  zoomSlider.addEventListener('input', () => {
+    const v = parseFloat(zoomSlider.value);
+    applyZoom(v);
+  });
+  zoomPill.addEventListener('click', resetZoom);
+
+  // Pinch gestures on the live camera area
+  [video, svg].forEach(el => {
+    el.addEventListener('touchstart', onTouchStart, { passive: false });
+    el.addEventListener('touchmove',  onTouchMove,  { passive: false });
+    el.addEventListener('touchend',   onTouchEnd);
+    el.addEventListener('touchcancel', onTouchEnd);
+  });
+
+  // Spacebar fire for desktop testing
+  document.addEventListener('keydown', (e) => {
+    if (e.code === 'Space' && !e.repeat && !fireBtn.disabled) {
+      e.preventDefault();
+      fire();
+    }
+  });
+
+  setupResize();
+  bindSettings();
+  drawSights();
+  updatePitchDisplay();
+</script>
+</body>
+</html>
