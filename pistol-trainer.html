@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-<title>Air Pistol Sight Trainer v7</title>
+<title>Air Pistol Sight Trainer v8</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; }
   html, body { width: 100%; height: 100%; overflow: hidden; background: #000; color: #fff; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
@@ -45,7 +45,7 @@
     background: linear-gradient(to bottom, rgba(0,0,0,0.55), transparent);
     z-index: 10;
   }
-  .hud-left { display: flex; gap: 6px; flex-wrap: wrap; max-width: 68%; }
+  .hud-left { display: flex; gap: 6px; flex-wrap: wrap; max-width: 68%; align-items: stretch; }
   .hud-right { display: flex; gap: 5px; flex-shrink: 0; }
   .pill {
     background: rgba(0,0,0,0.55);
@@ -61,9 +61,6 @@
     white-space: nowrap;
   }
   .pill-value { color: #ff4136; font-size: 14px; font-weight: 800; font-variant-numeric: tabular-nums; }
-  .pill.pitch .pill-value { min-width: 42px; text-align: center; }
-  .pill.pitch.hot .pill-value { color: #ffcc00; }
-  .pill.pitch.cool .pill-value { color: #55ff88; }
   .pill.avg .pill-value { color: #55ff88; min-width: 34px; text-align: center; }
   .pill.zoom { cursor: pointer; }
   .pill.zoom .pill-value { color: #ffffff; min-width: 36px; text-align: center; }
@@ -75,6 +72,38 @@
   .pill.detect.lost { border-color: rgba(255,204,0,0.45); }
   .pill.detect.lost .pill-value { color: #ffcc00; }
   .pill.detect:active { background: rgba(255,255,255,0.1); }
+
+  /* AIM pill (combined pitch + yaw) */
+  .pill.aim { padding: 5px 10px; }
+  .pill.aim > span:first-child { align-self: center; }
+  .pill.aim .aim-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.05;
+  }
+  .pill.aim .aim-line {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+    font-size: 11px;
+    font-weight: 700;
+  }
+  .pill.aim .aim-pre {
+    opacity: 0.55;
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+  }
+  .pill.aim .aim-num {
+    color: #ff4136;
+    min-width: 38px;
+    text-align: right;
+  }
+  .pill.aim .aim-num.cool { color: #55ff88; }
+  .pill.aim .aim-num.warn { color: #ffcc00; }
+  .pill.aim .aim-num.hot  { color: #ff8833; }
 
   .hud-btn {
     width: 38px; height: 38px;
@@ -144,6 +173,25 @@
     50% { opacity: 0.65; }
   }
 
+  /* Lock-required toast */
+  #lockHint {
+    position: absolute;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 140px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(255, 65, 54, 0.95);
+    color: white;
+    padding: 10px 18px;
+    border-radius: 22px;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 1.8px;
+    display: none;
+    z-index: 25;
+    box-shadow: 0 4px 16px rgba(255,65,54,0.4);
+  }
+  #lockHint.show { display: block; animation: pulse 0.4s ease; }
+
   /* Fire button */
   #fireBtn {
     position: absolute;
@@ -166,8 +214,16 @@
   }
   #fireBtn:active { transform: translateX(-50%) scale(0.93); }
   #fireBtn:disabled { opacity: 0.6; cursor: not-allowed; }
+  #fireBtn.shake { animation: shake 0.32s; }
+  @keyframes shake {
+    0%, 100% { transform: translateX(-50%); }
+    20% { transform: translateX(calc(-50% - 6px)); }
+    40% { transform: translateX(calc(-50% + 6px)); }
+    60% { transform: translateX(calc(-50% - 4px)); }
+    80% { transform: translateX(calc(-50% + 4px)); }
+  }
 
-  /* Full-screen target overlay (post-shot replay) */
+  /* Full-screen target overlay */
   #targetOverlay {
     position: absolute;
     inset: 0;
@@ -234,23 +290,6 @@
   }
   #targetDismiss:active { background: rgba(255,255,255,0.15); }
 
-  #replayLabel {
-    position: absolute;
-    top: 14%;
-    left: 50%;
-    transform: translateX(-50%);
-    background: rgba(255, 65, 54, 0.95);
-    color: white;
-    padding: 6px 14px;
-    border-radius: 20px;
-    font-size: 11px;
-    font-weight: 800;
-    letter-spacing: 2.5px;
-    display: none;
-    z-index: 15;
-    box-shadow: 0 4px 14px rgba(255,65,54,0.5);
-  }
-  #replayLabel.show { display: block; animation: pulse 0.4s ease; }
   @keyframes pulse {
     0% { transform: translateX(-50%) scale(0.7); opacity: 0; }
     100% { transform: translateX(-50%) scale(1); opacity: 1; }
@@ -391,21 +430,6 @@
     border: none;
     cursor: pointer;
   }
-  input[type=number] {
-    width: 100%;
-    background: rgba(255,255,255,0.06);
-    border: 1px solid rgba(255,255,255,0.12);
-    color: #fff;
-    padding: 11px 14px;
-    border-radius: 8px;
-    font-size: 15px;
-    font-weight: 700;
-    font-family: inherit;
-    outline: none;
-    font-variant-numeric: tabular-nums;
-  }
-  input[type=number]:focus { border-color: rgba(255,65,54,0.6); }
-
   .toggle-row {
     display: flex;
     justify-content: space-between;
@@ -526,8 +550,7 @@
   <div id="flash"></div>
   <div id="zoomBubble">1.0×</div>
   <div id="tapHint">▸ TAP THE CENTER OF YOUR TARGET ◂</div>
-
-  <div id="replayLabel">SHOT RELEASE</div>
+  <div id="lockHint">⚠ TARGET LOCK REQUIRED</div>
 
   <!-- Full-screen target overlay -->
   <div id="targetOverlay">
@@ -540,7 +563,13 @@
     <div class="hud-left">
       <div class="pill"><span>SHOTS</span><span class="pill-value" id="counter">0</span></div>
       <div class="pill avg" id="avgPill" style="display:none"><span>AVG</span><span class="pill-value" id="avgValue">—</span></div>
-      <div class="pill pitch" id="pitchPill"><span>PITCH</span><span class="pill-value" id="pitchValue">—</span></div>
+      <div class="pill aim" id="aimPill">
+        <span>AIM</span>
+        <span class="aim-stack">
+          <span class="aim-line"><span class="aim-pre">P</span><span id="pitchValue" class="aim-num">—</span></span>
+          <span class="aim-line"><span class="aim-pre">Y</span><span id="yawValue" class="aim-num">—</span></span>
+        </span>
+      </div>
       <div class="pill zoom" id="zoomPill" style="display:none"><span>ZOOM</span><span class="pill-value" id="zoomValue">1.0×</span></div>
       <div class="pill detect" id="detectPill" style="display:none"><span>DETECT</span><span class="pill-value" id="detectValue">—</span></div>
     </div>
@@ -566,13 +595,7 @@
     </div>
     <button class="btn-green" id="selectTargetBtn">◎ SELECT TARGET</button>
     <button class="btn-secondary" id="stopDetectBtn" style="display:none">STOP DETECTION</button>
-    <div class="help-text">Tap the button, then tap the center of the black aiming area on your target.</div>
-
-    <div class="setting-row">
-      <div class="setting-label">Target distance <span class="val" id="distanceVal">10.0 m</span></div>
-      <input type="number" id="distanceInput" min="1" max="25" step="0.1" value="10.0">
-    </div>
-    <div class="help-text">Used for the pitch-only fallback score (1–25 m). When 2D detection is locked, scoring uses the detected target geometry directly.</div>
+    <div class="help-text">Tap the button, then tap the center of the black aiming area on your target. Scoring requires a target lock.</div>
 
     <div class="setting-row">
       <div class="setting-label">Aim point offset (sub-six hold) <span class="val" id="aimOffsetVal">−30 mm</span></div>
@@ -598,12 +621,12 @@
     <div class="preset-row" id="zoomPresets"></div>
     <div class="help-text">Pinch the camera view to zoom, or use the slider.</div>
 
-    <div class="section-title">PITCH &amp; CALIBRATION</div>
+    <div class="section-title">PITCH &amp; YAW CALIBRATION</div>
     <button class="btn-primary" id="calibrateBtn2">⊕ CALIBRATE LEVEL NOW</button>
-    <div class="help-text">Hold the phone exactly as you'd hold the pistol at the moment of release, then tap to zero the pitch reference.</div>
+    <div class="help-text">Hold the phone exactly as you'd hold the pistol at the moment of release, then tap to zero both pitch (vertical) and yaw (horizontal) references.</div>
 
     <div class="toggle-row">
-      <span>Enable pitch simulation &amp; scoring</span>
+      <span>Enable pitch &amp; yaw simulation</span>
       <label class="switch"><input type="checkbox" id="pitchEnabled" checked><span class="slider-sw"></span></label>
     </div>
 
@@ -611,7 +634,7 @@
       <div class="setting-label">Sight radius (pistol length) <span class="val" id="sightRadiusVal">36 cm</span></div>
       <input type="range" id="sightRadius" min="15" max="60" value="36" step="1">
     </div>
-    <div class="help-text">Distance between rear and front sight. Longer radius = more visible pitch effect on the sights.</div>
+    <div class="help-text">Distance between rear and front sight. Longer radius = more visible angle effect on the sights.</div>
 
     <div class="section-title">POSITION</div>
     <div class="setting-row">
@@ -663,13 +686,14 @@
   <div id="startScreen">
     <div class="logo">▪ AIR PISTOL TRAINER ▪</div>
     <div class="title">Sight Picture Training</div>
-    <div class="version">v7 · SHOT MARKS ON TARGET</div>
-    <div class="subtitle">Full-screen target with shot marks after every release.</div>
+    <div class="version">v8 · 2D AIM &amp; AIR-PISTOL SOUND</div>
+    <div class="subtitle">Pitch + yaw move the front sight on both axes. Air-pistol-style shot sound. 2D scoring requires a target lock.</div>
     <button class="start-btn" id="startBtn">START CAMERA</button>
     <div class="instructions">
       Aim camera at target, <b>pinch</b> to zoom.<br>
-      Open settings → <b>SELECT TARGET</b> → tap the center of the black.<br>
-      Tap <b>FIRE</b> at release. Each shot opens the full-screen target with the new mark in red and earlier marks in grey.
+      Settings → <b>SELECT TARGET</b> → tap the center of the black.<br>
+      Tap <b>⊕</b> in your stance to zero both axes.<br>
+      Tap <b>FIRE</b> at release. No score without target lock.
     </div>
     <div id="errorMsg"></div>
   </div>
@@ -681,24 +705,12 @@
   const RING_10_RADIUS_MM = 5.75;
   const RING_STEP_MM = 8;
 
-  // ISSF 10 m air pistol target geometry (mm)
   const BLACK_DIAMETER_MM = 59.5;
   const RING_1_DIAMETER_MM = 155.5;
   const OUTER_RATIO = RING_1_DIAMETER_MM / BLACK_DIAMETER_MM;
 
-  // Ring radii in mm — index 0 unused, 1..10 valid; rings 7..10 are inside the black
   const RING_RADII_MM = [
-    null,   // 0
-    77.75,  // 1
-    69.75,  // 2
-    61.75,  // 3
-    53.75,  // 4
-    45.75,  // 5
-    37.75,  // 6
-    29.75,  // 7 (= edge of black)
-    21.75,  // 8
-    13.75,  // 9
-    5.75    // 10
+    null, 77.75, 69.75, 61.75, 53.75, 45.75, 37.75, 29.75, 21.75, 13.75, 5.75
   ];
 
   const DETECTION_INTERVAL_MS = 200;
@@ -709,7 +721,7 @@
   const MIN_FILL_RATIO = 0.55;
   const DETECTION_LOSS_FRAMES = 8;
 
-  const PITCH_HISTORY_MS = 1000;
+  const ANGLE_HISTORY_MS = 1000;
 
   // ===== Config & state =====
   const defaults = {
@@ -719,7 +731,6 @@
     opacity: 100,
     sightRadius: 36,
     pitchEnabled: true,
-    targetDistance: 10,
     aimOffsetMm: -30,
     overlayDurSec: 2.0
   };
@@ -733,24 +744,18 @@
   let isReplaying = false;
   let overlayTimer = null;
 
-  // Orientation
-  let zeroBeta = null;
-  let rawBeta = null;
-  let smoothedBeta = null;
+  // Orientation: pitch (beta) + yaw (alpha)
+  let zeroBeta = null, rawBeta = null, smoothedBeta = null;
+  let zeroAlpha = null, rawAlpha = null, smoothedAlpha = null;
   let orientationAttached = false;
-  const pitchHistory = [];
+  const angleHistory = [];  // { t, pitch, yaw } samples
 
   // Zoom
-  let zoomCaps = null;
-  let currentZoom = 1;
-  let zoomApplying = false;
-  let pendingZoom = null;
-  let zoomBubbleTimer = null;
+  let zoomCaps = null, currentZoom = 1;
+  let zoomApplying = false, pendingZoom = null, zoomBubbleTimer = null;
 
   // Touch
-  let pinchStartDist = null;
-  let pinchStartZoom = null;
-  let singleTouch = null;
+  let pinchStartDist = null, pinchStartZoom = null, singleTouch = null;
 
   // Detection
   const detection = {
@@ -761,6 +766,8 @@
   const procCanvas = document.createElement('canvas');
   const procCtx = procCanvas.getContext('2d', { willReadFrequently: true });
 
+  let lockHintTimer = null;
+
   // ===== DOM refs =====
   const video = document.getElementById('video');
   const svgSights = document.getElementById('sightOverlay');
@@ -769,10 +776,10 @@
   const counterEl = document.getElementById('counter');
   const avgPillEl = document.getElementById('avgPill');
   const avgValueEl = document.getElementById('avgValue');
-  const replayLabel = document.getElementById('replayLabel');
   const fireBtn = document.getElementById('fireBtn');
+  const aimPillEl = document.getElementById('aimPill');
   const pitchValueEl = document.getElementById('pitchValue');
-  const pitchPillEl = document.getElementById('pitchPill');
+  const yawValueEl = document.getElementById('yawValue');
   const zoomPill = document.getElementById('zoomPill');
   const zoomValueEl = document.getElementById('zoomValue');
   const zoomSlider = document.getElementById('zoomSlider');
@@ -780,18 +787,38 @@
   const zoomPresets = document.getElementById('zoomPresets');
   const zoomBubble = document.getElementById('zoomBubble');
   const tapHint = document.getElementById('tapHint');
+  const lockHint = document.getElementById('lockHint');
   const detectPill = document.getElementById('detectPill');
   const detectValueEl = document.getElementById('detectValue');
   const selectTargetBtn = document.getElementById('selectTargetBtn');
   const stopDetectBtn = document.getElementById('stopDetectBtn');
   const detectLockBadge = document.getElementById('detectLockBadge');
   const detectLostBadge = document.getElementById('detectLostBadge');
-  const distanceInput = document.getElementById('distanceInput');
-  const distanceValEl = document.getElementById('distanceVal');
   const targetOverlay = document.getElementById('targetOverlay');
   const targetSvg = document.getElementById('targetSvg');
   const targetCaption = document.getElementById('targetCaption');
   const targetDismiss = document.getElementById('targetDismiss');
+
+  // ===== Angle helpers =====
+
+  function getPitchDelta() {
+    if (!config.pitchEnabled) return 0;
+    if (zeroBeta === null || smoothedBeta === null) return 0;
+    return smoothedBeta - zeroBeta;
+  }
+
+  function getYawDelta() {
+    if (!config.pitchEnabled) return 0;
+    if (zeroAlpha === null || smoothedAlpha === null) return 0;
+    let d = smoothedAlpha - zeroAlpha;
+    while (d > 180) d -= 360;
+    while (d < -180) d += 360;
+    return -d; // positive = yawed right (alpha decreases when device yaws CW from above)
+  }
+
+  function isPitchLive() {
+    return config.pitchEnabled && zeroBeta !== null && smoothedBeta !== null;
+  }
 
   // ===== Scoring =====
 
@@ -801,10 +828,10 @@
     if (!w || !h) return null;
     const cx = w / 2 + (config.hPos / 100) * w;
     const cy = (config.vPos / 100) * h;
-    const pitchDeltaDeg = getPitchDelta();
-    const pitchPerDeg = 0.03 * (config.sightRadius / 36) * h;
-    const frontOffsetY = -pitchDeltaDeg * pitchPerDeg;
-    return { x: cx, y: cy + frontOffsetY };
+    const gainPerDeg = 0.03 * (config.sightRadius / 36) * h;
+    const offsetX =  getYawDelta()   * gainPerDeg;
+    const offsetY = -getPitchDelta() * gainPerDeg;
+    return { x: cx + offsetX, y: cy + offsetY };
   }
 
   function scoreFromMm(distanceMm) {
@@ -846,11 +873,11 @@
     const impactDxMm = dxMm;
     const impactDyMm = dyMmDown + config.aimOffsetMm;
     const distMm = Math.sqrt(impactDxMm * impactDxMm + impactDyMm * impactDyMm);
+    const score = scoreFromMm(distMm);
 
     return {
-      mode: '2D',
-      score: scoreFromMm(distMm),
-      grade: gradeFromScore(scoreFromMm(distMm)),
+      score,
+      grade: gradeFromScore(score),
       offsetMm: distMm,
       dxMm: impactDxMm,
       dyMm: impactDyMm,
@@ -858,34 +885,25 @@
     };
   }
 
+  // Hold quality: combined pitch + yaw peak-to-peak over the last 500 ms
   function computeHoldQuality() {
     const now = performance.now();
-    const recent = pitchHistory.filter(p => now - p.t <= 500);
+    const recent = angleHistory.filter(p => now - p.t <= 500);
     if (recent.length < 4) return null;
-    let lo = Infinity, hi = -Infinity;
-    for (const p of recent) { if (p.delta < lo) lo = p.delta; if (p.delta > hi) hi = p.delta; }
-    const ptp = hi - lo;
+    let pLo = Infinity, pHi = -Infinity, yLo = Infinity, yHi = -Infinity;
+    for (const s of recent) {
+      if (s.pitch < pLo) pLo = s.pitch; if (s.pitch > pHi) pHi = s.pitch;
+      if (s.yaw   < yLo) yLo = s.yaw;   if (s.yaw   > yHi) yHi = s.yaw;
+    }
+    const pPtp = pHi - pLo;
+    const yPtp = yHi - yLo;
+    const ptp = Math.sqrt(pPtp * pPtp + yPtp * yPtp);
     let label;
-    if (ptp < 0.15) label = 'STEADY';
-    else if (ptp < 0.4) label = 'GOOD HOLD';
-    else if (ptp < 0.8) label = 'FAIR HOLD';
+    if (ptp < 0.2) label = 'STEADY';
+    else if (ptp < 0.5) label = 'GOOD HOLD';
+    else if (ptp < 1.0) label = 'FAIR HOLD';
     else label = 'WOBBLY';
-    return { ptp, label };
-  }
-
-  function computeShotFromPitch(pitchDelta_deg) {
-    const clampedPitch = Math.max(-45, Math.min(45, pitchDelta_deg));
-    const pitchRad = clampedPitch * Math.PI / 180;
-    const distanceMm = config.targetDistance * 1000;
-    const errorMm = Math.tan(pitchRad) * distanceMm;
-    const score = scoreFromMm(Math.abs(errorMm));
-    return {
-      mode: 'PITCH',
-      pitchDelta: pitchDelta_deg,
-      errorMm, score,
-      grade: gradeFromScore(score),
-      direction: errorMm >= 0 ? 'HIGH' : 'LOW'
-    };
+    return { ptp, pPtp, yPtp, label };
   }
 
   function updateSessionStats() {
@@ -895,33 +913,20 @@
     avgPillEl.style.display = '';
   }
 
-  // ===== Target overlay (full-screen with shot marks) =====
+  // ===== Target overlay =====
 
-  // Build static SVG content for the target. Coordinates: origin at center, +x right, +y down, units = mm.
-  // Target paper extends 85 mm in every direction (170 mm square).
   function renderTargetSvg(latestShot) {
-    const cardSize = 85; // half-side of the target paper in mm
+    const cardSize = 85;
     const parts = [];
-
-    // Paper card (off-white)
     parts.push('<rect x="-' + cardSize + '" y="-' + cardSize + '" width="' + (2*cardSize) + '" height="' + (2*cardSize) + '" rx="2" fill="#f1ede0" />');
-
-    // Black aiming area (rings 7..10): one solid disc at ring-7 radius
     parts.push('<circle cx="0" cy="0" r="' + RING_RADII_MM[7] + '" fill="#080808" />');
-
-    // Ring lines on white (rings 1..6) — thin black lines
     for (let r = 1; r <= 6; r++) {
       parts.push('<circle cx="0" cy="0" r="' + RING_RADII_MM[r] + '" fill="none" stroke="#0c0c0c" stroke-width="0.5" />');
     }
-    // Ring lines on black (rings 8..10) — thin white lines so they're visible
     for (let r = 8; r <= 10; r++) {
       parts.push('<circle cx="0" cy="0" r="' + RING_RADII_MM[r] + '" fill="none" stroke="rgba(255,255,255,0.55)" stroke-width="0.4" />');
     }
-    // Center dot
     parts.push('<circle cx="0" cy="0" r="0.6" fill="rgba(255,255,255,0.6)" />');
-
-    // Ring numbers — only on the white rings (1..6) per ISSF convention.
-    // Place each number twice (top and bottom) midway between consecutive ring lines, on the vertical axis.
     for (let r = 1; r <= 6; r++) {
       const inner = RING_RADII_MM[r];
       const outer = (r === 1) ? cardSize - 5 : RING_RADII_MM[r - 1];
@@ -932,74 +937,39 @@
         '<text x="0" y="' + (y) + '" text-anchor="middle" dominant-baseline="central" font-size="' + fontSize + '" font-family="Arial, sans-serif" font-weight="700" fill="#0c0c0c">' + r + '</text>'
       );
     }
-
-    // Shot marks. Render older shots first, latest on top.
-    sessionShots.forEach((shot, idx) => {
+    sessionShots.forEach((shot) => {
       const isLatest = (shot === latestShot);
-      let cx, cy, isPitchOnly = false;
-      if (shot.mode === '2D') {
-        cx = shot.dxMm;
-        cy = shot.dyMm;
-      } else {
-        // Pitch-only: only vertical info. errorMm > 0 means HIGH (above center) → -y in SVG.
-        cx = 0;
-        cy = -shot.errorMm;
-        isPitchOnly = true;
-      }
-      // Clamp to within the paper for display
+      let cx = shot.dxMm, cy = shot.dyMm;
       cx = Math.max(-cardSize + 1, Math.min(cardSize - 1, cx));
       cy = Math.max(-cardSize + 1, Math.min(cardSize - 1, cy));
-
       const fill = isLatest ? '#ff2a2a' : 'rgba(180,180,180,0.55)';
       const stroke = isLatest ? '#ffffff' : 'rgba(255,255,255,0.55)';
       const strokeW = isLatest ? 0.45 : 0.3;
       const r = PELLET_RADIUS_MM;
-
-      if (isPitchOnly) {
-        // Render as a horizontal line spanning the paper at impact y, with a dot at x=0
-        const lineColor = isLatest ? 'rgba(255,42,42,0.5)' : 'rgba(180,180,180,0.3)';
-        parts.push('<line x1="' + (-cardSize+2) + '" y1="' + cy + '" x2="' + (cardSize-2) + '" y2="' + cy + '" stroke="' + lineColor + '" stroke-width="0.35" stroke-dasharray="2 2" />');
-      }
       parts.push('<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="' + fill + '" stroke="' + stroke + '" stroke-width="' + strokeW + '" />');
-
-      // Shot number for latest only (small)
       if (isLatest) {
         parts.push('<text x="' + (cx + r + 1.5) + '" y="' + (cy - r - 1) + '" font-size="3" font-family="Arial, sans-serif" font-weight="800" fill="#ff2a2a" stroke="#fff" stroke-width="0.15" paint-order="stroke">' + sessionShots.length + '</text>');
       }
     });
-
     targetSvg.innerHTML = parts.join('');
   }
 
   function showTargetOverlay(shot) {
     renderTargetSvg(shot);
-
-    // Build caption
     const grade = shot.grade.toLowerCase();
     let captionHtml = '<span class="grade-tag ' + grade + '">' + shot.grade + '</span>' +
                       '<span class="score-big">' + shot.score.toFixed(1) + '</span>';
     let sub;
-    if (shot.mode === '2D') {
-      const off = shot.offsetMm;
-      const clockTxt = shot.clock ? ('  ·  ' + shot.clock + ' o\u2032clock') : '';
-      sub = (off < 0.8 ? 'DEAD CENTER' : (off.toFixed(1) + ' mm from center' + clockTxt)) + '  ·  2D';
-      if (shot.hold && shot.hold.label) {
-        sub += '  ·  ' + shot.hold.label + ' (' + shot.hold.ptp.toFixed(2) + '°)';
-      }
-    } else {
-      const distLabel = config.targetDistance.toFixed(1) + ' m';
-      const absErr = Math.abs(shot.errorMm);
-      sub = (absErr < 0.5
-        ? ('DEAD CENTER at ' + distLabel)
-        : (absErr.toFixed(1) + ' mm ' + shot.direction + ' at ' + distLabel)
-      ) + '  ·  pitch only';
+    const off = shot.offsetMm;
+    const clockTxt = shot.clock ? ('  ·  ' + shot.clock + ' o\u2032clock') : '';
+    sub = (off < 0.8 ? 'DEAD CENTER' : (off.toFixed(1) + ' mm from center' + clockTxt));
+    if (shot.hold && shot.hold.label) {
+      sub += '  ·  ' + shot.hold.label + ' (' + shot.hold.ptp.toFixed(2) + '°)';
     }
     captionHtml += '<span class="sub">' + sub + '</span>';
     targetCaption.innerHTML = captionHtml;
     targetCaption.className = grade;
-
     targetOverlay.classList.add('show');
-
     if (overlayTimer) { clearTimeout(overlayTimer); overlayTimer = null; }
     overlayTimer = setTimeout(hideTargetOverlay, config.overlayDurSec * 1000);
   }
@@ -1011,15 +981,6 @@
   }
 
   // ===== Sight rendering =====
-
-  function getPitchDelta() {
-    if (!config.pitchEnabled) return 0;
-    if (zeroBeta === null || smoothedBeta === null) return 0;
-    return smoothedBeta - zeroBeta;
-  }
-  function isPitchLive() {
-    return config.pitchEnabled && zeroBeta !== null && smoothedBeta !== null;
-  }
 
   function drawSights() {
     const w = svgSights.clientWidth;
@@ -1039,9 +1000,9 @@
     baseH = Math.max(0, Math.min(baseH, rearH - 2));
     const topY = cy, bottomY = topY + rearH, baseTopY = bottomY - baseH;
 
-    const pitchDeltaDeg = getPitchDelta();
-    const pitchPerDeg = 0.03 * (config.sightRadius / 36) * h;
-    const frontOffsetY = -pitchDeltaDeg * pitchPerDeg;
+    const gainPerDeg = 0.03 * (config.sightRadius / 36) * h;
+    const frontOffsetY = -getPitchDelta() * gainPerDeg;
+    const frontOffsetX =  getYawDelta()   * gainPerDeg;
 
     const rearPath = [
       'M ' + (cx - rearW/2) + ' ' + topY,
@@ -1055,7 +1016,7 @@
       'Z'
     ].join(' ');
 
-    const frontX = cx - frontW/2;
+    const frontX = cx - frontW/2 + frontOffsetX;
     const frontTopY = topY + frontOffsetY;
     const op = config.opacity / 100;
 
@@ -1414,7 +1375,7 @@
     return { ok: true, cx: cssCX, cy: cssCY, blackRadius: cssR, outerRadius: cssR * OUTER_RATIO, fillRatio };
   }
 
-  // ===== Orientation =====
+  // ===== Orientation (pitch + yaw) =====
 
   async function attachOrientation() {
     if (orientationAttached) return;
@@ -1427,33 +1388,79 @@
       orientationAttached = true;
     } catch (e) { console.warn('Orientation unavailable:', e); }
   }
+
   function handleOrientation(event) {
-    if (event.beta === null || event.beta === undefined) return;
-    rawBeta = event.beta;
-    const alpha = 0.35;
-    smoothedBeta = (smoothedBeta === null) ? rawBeta : smoothedBeta * (1 - alpha) + rawBeta * alpha;
-    if (zeroBeta === null) zeroBeta = smoothedBeta;
+    // Pitch (beta): always available on devices with accelerometer
+    if (event.beta !== null && event.beta !== undefined) {
+      rawBeta = event.beta;
+      const a = 0.35;
+      smoothedBeta = (smoothedBeta === null) ? rawBeta : smoothedBeta * (1 - a) + rawBeta * a;
+      if (zeroBeta === null) zeroBeta = smoothedBeta;
+    }
+
+    // Yaw (alpha): may be null on devices without magnetometer or before
+    // the user grants compass-orientation permission. Smoothing must respect 0/360 wraparound.
+    if (event.alpha !== null && event.alpha !== undefined) {
+      rawAlpha = event.alpha;
+      const a = 0.35;
+      if (smoothedAlpha === null) {
+        smoothedAlpha = rawAlpha;
+      } else {
+        let diff = rawAlpha - smoothedAlpha;
+        while (diff > 180) diff -= 360;
+        while (diff < -180) diff += 360;
+        smoothedAlpha = smoothedAlpha + diff * a;
+        while (smoothedAlpha < 0)    smoothedAlpha += 360;
+        while (smoothedAlpha >= 360) smoothedAlpha -= 360;
+      }
+      if (zeroAlpha === null) zeroAlpha = smoothedAlpha;
+    }
+
     const now = performance.now();
-    pitchHistory.push({ t: now, delta: smoothedBeta - zeroBeta });
-    while (pitchHistory.length && now - pitchHistory[0].t > PITCH_HISTORY_MS) pitchHistory.shift();
-    updatePitchDisplay();
+    angleHistory.push({ t: now, pitch: getPitchDelta(), yaw: getYawDelta() });
+    while (angleHistory.length && now - angleHistory[0].t > ANGLE_HISTORY_MS) angleHistory.shift();
+
+    updateAimDisplay();
     drawSights();
   }
-  function updatePitchDisplay() {
-    if (smoothedBeta === null || zeroBeta === null) {
-      pitchValueEl.textContent = '—';
-      pitchPillEl.classList.remove('hot', 'cool'); return;
-    }
-    const d = smoothedBeta - zeroBeta;
-    const sign = d >= 0 ? '+' : '';
-    pitchValueEl.textContent = sign + d.toFixed(1) + '°';
-    pitchPillEl.classList.toggle('hot', Math.abs(d) > 2.0);
-    pitchPillEl.classList.toggle('cool', Math.abs(d) < 0.3);
+
+  function classifyDeg(absDeg) {
+    if (absDeg < 0.3) return 'cool';
+    if (absDeg < 1.0) return '';
+    if (absDeg < 2.0) return 'warn';
+    return 'hot';
   }
+
+  function updateAimDisplay() {
+    const haveP = (zeroBeta  !== null && smoothedBeta  !== null);
+    const haveY = (zeroAlpha !== null && smoothedAlpha !== null);
+
+    if (haveP) {
+      const p = smoothedBeta - zeroBeta;
+      const sign = p >= 0 ? '+' : '';
+      pitchValueEl.textContent = sign + p.toFixed(1) + '°';
+      pitchValueEl.className = 'aim-num ' + classifyDeg(Math.abs(p));
+    } else {
+      pitchValueEl.textContent = '—';
+      pitchValueEl.className = 'aim-num';
+    }
+
+    if (haveY) {
+      const y = getYawDelta();
+      const sign = y >= 0 ? '+' : '';
+      yawValueEl.textContent = sign + y.toFixed(1) + '°';
+      yawValueEl.className = 'aim-num ' + classifyDeg(Math.abs(y));
+    } else {
+      yawValueEl.textContent = '—';
+      yawValueEl.className = 'aim-num';
+    }
+  }
+
   function calibrateLevel() {
     if (smoothedBeta === null) { attachOrientation(); return; }
     zeroBeta = smoothedBeta;
-    updatePitchDisplay();
+    if (smoothedAlpha !== null) zeroAlpha = smoothedAlpha;
+    updateAimDisplay();
     drawSights();
     ['calibrateBtn','calibrateBtn2'].forEach(id => {
       const b = document.getElementById(id); if (!b) return;
@@ -1462,54 +1469,88 @@
     });
   }
 
-  // ===== Fire =====
+  // ===== Sound (air-pistol-style "thwop") =====
 
-  function playClickSound() {
+  function playShotSound() {
     try {
       if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       if (audioCtx.state === 'suspended') audioCtx.resume();
       const t = audioCtx.currentTime;
+
+      const master = audioCtx.createGain();
+      master.gain.value = 1.0;
+      master.connect(audioCtx.destination);
+
+      // Low body of the shot — sine sweep 280 → 55 Hz over ~120 ms with a quick attack.
       const osc = audioCtx.createOscillator();
-      const gain = audioCtx.createGain();
-      osc.type = 'square';
-      osc.frequency.setValueAtTime(1400, t);
-      osc.frequency.exponentialRampToValueAtTime(180, t + 0.07);
-      gain.gain.setValueAtTime(0.22, t);
-      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.09);
-      osc.connect(gain); gain.connect(audioCtx.destination);
-      osc.start(t); osc.stop(t + 0.1);
-    } catch (e) {}
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(280, t);
+      osc.frequency.exponentialRampToValueAtTime(55, t + 0.10);
+      const oscGain = audioCtx.createGain();
+      oscGain.gain.setValueAtTime(0.0, t);
+      oscGain.gain.linearRampToValueAtTime(0.45, t + 0.004);
+      oscGain.gain.exponentialRampToValueAtTime(0.001, t + 0.16);
+      osc.connect(oscGain);
+      oscGain.connect(master);
+      osc.start(t);
+      osc.stop(t + 0.18);
+
+      // Brief filtered-noise burst — the mechanism / spring click that precedes the body.
+      const noiseDur = 0.025;
+      const noiseSamples = Math.floor(audioCtx.sampleRate * noiseDur);
+      const noiseBuf = audioCtx.createBuffer(1, noiseSamples, audioCtx.sampleRate);
+      const nd = noiseBuf.getChannelData(0);
+      for (let i = 0; i < noiseSamples; i++) nd[i] = Math.random() * 2 - 1;
+      const noiseSrc = audioCtx.createBufferSource();
+      noiseSrc.buffer = noiseBuf;
+      const noiseFilter = audioCtx.createBiquadFilter();
+      noiseFilter.type = 'lowpass';
+      noiseFilter.frequency.value = 700;
+      noiseFilter.Q.value = 1.5;
+      const noiseGain = audioCtx.createGain();
+      noiseGain.gain.setValueAtTime(0.18, t);
+      noiseGain.gain.exponentialRampToValueAtTime(0.001, t + noiseDur);
+      noiseSrc.connect(noiseFilter);
+      noiseFilter.connect(noiseGain);
+      noiseGain.connect(master);
+      noiseSrc.start(t);
+    } catch (e) { /* silent */ }
+  }
+
+  // ===== Fire =====
+
+  function showLockHint() {
+    if (lockHintTimer) clearTimeout(lockHintTimer);
+    lockHint.classList.add('show');
+    lockHintTimer = setTimeout(() => lockHint.classList.remove('show'), 1200);
+    fireBtn.classList.remove('shake');
+    void fireBtn.offsetWidth; // restart animation
+    fireBtn.classList.add('shake');
+    setTimeout(() => fireBtn.classList.remove('shake'), 320);
   }
 
   function fire() {
     if (isReplaying || !stream) return;
+
+    const shot = computeShot2D();
+    if (!shot) {
+      // No target lock — abort with a hint, no sound, no shot recorded.
+      showLockHint();
+      return;
+    }
+    shot.hold = computeHoldQuality();
+
     isReplaying = true;
-
-    let shot = computeShot2D();
-    if (shot) shot.hold = computeHoldQuality();
-    else if (isPitchLive()) shot = computeShotFromPitch(smoothedBeta - zeroBeta);
-
     flash.classList.add('on');
     setTimeout(() => flash.classList.remove('on'), 90);
-    playClickSound();
+    playShotSound();
     if (navigator.vibrate) navigator.vibrate(30);
 
     shotCount++;
     counterEl.textContent = shotCount;
-
-    if (shot) {
-      sessionShots.push(shot);
-      updateSessionStats();
-      // Brief delay so the camera flash effect is visible before the target appears
-      setTimeout(() => showTargetOverlay(shot), 120);
-    } else {
-      // No score available — just show the plain release badge
-      replayLabel.classList.add('show');
-      setTimeout(() => {
-        replayLabel.classList.remove('show');
-        isReplaying = false;
-      }, 1200);
-    }
+    sessionShots.push(shot);
+    updateSessionStats();
+    setTimeout(() => showTargetOverlay(shot), 120);
   }
 
   function resetSession() {
@@ -1568,27 +1609,12 @@
       config.overlayDurSec = parseFloat(ovEl.value);
       updateValLabel('overlayDur', config.overlayDurSec, ovValEl);
     };
+  }
 
-    distanceInput.value = config.targetDistance.toFixed(1);
-    updateDistanceLabel();
-    distanceInput.addEventListener('input', onDistanceInput);
-    distanceInput.addEventListener('change', onDistanceInput);
-  }
-  function onDistanceInput() {
-    let v = parseFloat(distanceInput.value);
-    if (isNaN(v)) return;
-    v = Math.max(1, Math.min(25, v));
-    config.targetDistance = v;
-    updateDistanceLabel();
-  }
-  function updateDistanceLabel() {
-    distanceValEl.textContent = config.targetDistance.toFixed(1) + ' m';
-  }
   function resetSights() {
-    const keepDist = config.targetDistance;
     const keepAim = config.aimOffsetMm;
     const keepOverlay = config.overlayDurSec;
-    config = { ...defaults, targetDistance: keepDist, aimOffsetMm: keepAim, overlayDurSec: keepOverlay };
+    config = { ...defaults, aimOffsetMm: keepAim, overlayDurSec: keepOverlay };
     bindSettings();
     drawSights();
   }
@@ -1638,7 +1664,7 @@
   bindSettings();
   drawSights();
   drawDetection();
-  updatePitchDisplay();
+  updateAimDisplay();
 </script>
 </body>
 </html>
