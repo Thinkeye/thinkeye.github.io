@@ -3,21 +3,20 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-<title>Air Pistol Sight Trainer v5</title>
+<title>Air Pistol Sight Trainer v7</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; }
   html, body { width: 100%; height: 100%; overflow: hidden; background: #000; color: #fff; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
 
   #app { position: fixed; inset: 0; }
 
-  #video, #freezeCanvas {
+  #video {
     position: absolute; inset: 0;
     width: 100%; height: 100%;
     object-fit: cover;
     background: #000;
     touch-action: none;
   }
-  #freezeCanvas { display: none; }
 
   #detectionOverlay, #sightOverlay {
     position: absolute; inset: 0;
@@ -168,6 +167,73 @@
   #fireBtn:active { transform: translateX(-50%) scale(0.93); }
   #fireBtn:disabled { opacity: 0.6; cursor: not-allowed; }
 
+  /* Full-screen target overlay (post-shot replay) */
+  #targetOverlay {
+    position: absolute;
+    inset: 0;
+    background: #0a0a0a;
+    display: none;
+    z-index: 30;
+    align-items: center;
+    justify-content: center;
+  }
+  #targetOverlay.show { display: flex; animation: ovFade 0.18s ease-out; }
+  @keyframes ovFade { from { opacity: 0; } to { opacity: 1; } }
+  #targetSvg {
+    width: 100%;
+    height: 100%;
+    max-width: min(100vw, 100vh);
+    max-height: min(100vw, 100vh);
+  }
+  #targetCaption {
+    position: absolute;
+    top: calc(env(safe-area-inset-top, 0px) + 14px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0,0,0,0.65);
+    border: 1px solid rgba(255,255,255,0.14);
+    padding: 9px 18px;
+    border-radius: 24px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1.4px;
+    white-space: nowrap;
+    text-align: center;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    z-index: 31;
+  }
+  #targetCaption .score-big { font-size: 18px; font-weight: 900; margin: 0 6px; vertical-align: middle; }
+  #targetCaption .grade-tag { padding: 3px 9px; border-radius: 6px; margin-left: 6px; font-size: 10px; vertical-align: middle; }
+  #targetCaption .grade-tag.excellent { background: rgba(85,255,136,0.2); color: #55ff88; }
+  #targetCaption .grade-tag.good      { background: rgba(168,224,85,0.2); color: #a8e055; }
+  #targetCaption .grade-tag.fair      { background: rgba(255,204,0,0.2); color: #ffcc00; }
+  #targetCaption .grade-tag.poor      { background: rgba(255,136,51,0.2); color: #ff8833; }
+  #targetCaption .grade-tag.miss      { background: rgba(255,65,54,0.2); color: #ff4136; }
+  #targetCaption.excellent .score-big { color: #55ff88; }
+  #targetCaption.good .score-big      { color: #a8e055; }
+  #targetCaption.fair .score-big      { color: #ffcc00; }
+  #targetCaption.poor .score-big      { color: #ff8833; }
+  #targetCaption.miss .score-big      { color: #ff4136; }
+  #targetCaption .sub { display: block; margin-top: 4px; font-weight: 600; opacity: 0.65; letter-spacing: 0.8px; font-size: 10px; }
+  #targetDismiss {
+    position: absolute;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 26px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.18);
+    color: #fff;
+    padding: 11px 26px;
+    border-radius: 24px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    cursor: pointer;
+    z-index: 31;
+  }
+  #targetDismiss:active { background: rgba(255,255,255,0.15); }
+
   #replayLabel {
     position: absolute;
     top: 14%;
@@ -189,67 +255,6 @@
     0% { transform: translateX(-50%) scale(0.7); opacity: 0; }
     100% { transform: translateX(-50%) scale(1); opacity: 1; }
   }
-
-  #shotResult {
-    position: absolute;
-    top: 13%;
-    left: 50%;
-    transform: translateX(-50%);
-    background: rgba(0,0,0,0.78);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-    padding: 16px 26px 14px;
-    border-radius: 14px;
-    text-align: center;
-    display: none;
-    z-index: 15;
-    border: 2px solid rgba(255,255,255,0.1);
-    min-width: 170px;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
-  }
-  #shotResult.show { display: block; animation: resultPop 0.35s cubic-bezier(.3,.8,.2,1.1); }
-  @keyframes resultPop {
-    0% { transform: translateX(-50%) scale(0.55); opacity: 0; }
-    100% { transform: translateX(-50%) scale(1); opacity: 1; }
-  }
-  .shot-score {
-    font-size: 52px;
-    font-weight: 900;
-    line-height: 1;
-    font-variant-numeric: tabular-nums;
-    margin-bottom: 4px;
-    color: #fff;
-    letter-spacing: -1px;
-  }
-  .shot-grade {
-    font-size: 12px;
-    font-weight: 800;
-    letter-spacing: 3px;
-    margin-bottom: 6px;
-    opacity: 0.95;
-  }
-  .shot-deviation {
-    font-size: 11px;
-    opacity: 0.7;
-    letter-spacing: 0.4px;
-    font-weight: 500;
-  }
-  .shot-deviation b { font-weight: 700; opacity: 1; }
-  #shotResult.grade-excellent { border-color: rgba(85,255,136,0.6); }
-  #shotResult.grade-excellent .shot-score,
-  #shotResult.grade-excellent .shot-grade { color: #55ff88; }
-  #shotResult.grade-good { border-color: rgba(168,224,85,0.6); }
-  #shotResult.grade-good .shot-score,
-  #shotResult.grade-good .shot-grade { color: #a8e055; }
-  #shotResult.grade-fair { border-color: rgba(255,204,0,0.6); }
-  #shotResult.grade-fair .shot-score,
-  #shotResult.grade-fair .shot-grade { color: #ffcc00; }
-  #shotResult.grade-poor { border-color: rgba(255,136,51,0.6); }
-  #shotResult.grade-poor .shot-score,
-  #shotResult.grade-poor .shot-grade { color: #ff8833; }
-  #shotResult.grade-miss { border-color: rgba(255,65,54,0.6); }
-  #shotResult.grade-miss .shot-score,
-  #shotResult.grade-miss .shot-grade { color: #ff4136; }
 
   #startScreen {
     position: absolute; inset: 0;
@@ -400,8 +405,6 @@
     font-variant-numeric: tabular-nums;
   }
   input[type=number]:focus { border-color: rgba(255,65,54,0.6); }
-  input[type=number]::-webkit-inner-spin-button,
-  input[type=number]::-webkit-outer-spin-button { opacity: 0.5; }
 
   .toggle-row {
     display: flex;
@@ -501,7 +504,6 @@
     letter-spacing: 0.3px;
   }
   .preset-btn:active { background: rgba(255,255,255,0.14); }
-  .preset-btn:disabled { opacity: 0.3; cursor: not-allowed; }
   .status-badge {
     display: inline-block;
     padding: 3px 8px;
@@ -519,7 +521,6 @@
 <body>
 <div id="app">
   <video id="video" autoplay playsinline muted></video>
-  <canvas id="freezeCanvas"></canvas>
   <svg id="detectionOverlay" preserveAspectRatio="none"></svg>
   <svg id="sightOverlay" preserveAspectRatio="none"></svg>
   <div id="flash"></div>
@@ -527,10 +528,12 @@
   <div id="tapHint">▸ TAP THE CENTER OF YOUR TARGET ◂</div>
 
   <div id="replayLabel">SHOT RELEASE</div>
-  <div id="shotResult">
-    <div class="shot-score" id="shotScore">—</div>
-    <div class="shot-grade" id="shotGrade">—</div>
-    <div class="shot-deviation" id="shotDeviation">—</div>
+
+  <!-- Full-screen target overlay -->
+  <div id="targetOverlay">
+    <svg id="targetSvg" viewBox="-95 -95 190 190" preserveAspectRatio="xMidYMid meet"></svg>
+    <div id="targetCaption"></div>
+    <button id="targetDismiss">DISMISS</button>
   </div>
 
   <div class="hud-top">
@@ -544,7 +547,7 @@
     <div class="hud-right">
       <button class="hud-btn" id="calibrateBtn" title="Calibrate level">⊕</button>
       <button class="hud-btn" id="resetBtn" title="Reset session">↺</button>
-      <button class="hud-btn" id="settingsBtn" title="Sight settings">⚙</button>
+      <button class="hud-btn" id="settingsBtn" title="Settings">⚙</button>
     </div>
   </div>
 
@@ -563,19 +566,25 @@
     </div>
     <button class="btn-green" id="selectTargetBtn">◎ SELECT TARGET</button>
     <button class="btn-secondary" id="stopDetectBtn" style="display:none">STOP DETECTION</button>
-    <div class="help-text">Tap the button, then tap the center of the black aiming area on your target. Detection runs at 5 Hz and will show a green outline around the detected target.</div>
+    <div class="help-text">Tap the button, then tap the center of the black aiming area on your target.</div>
 
     <div class="setting-row">
       <div class="setting-label">Target distance <span class="val" id="distanceVal">10.0 m</span></div>
       <input type="number" id="distanceInput" min="1" max="25" step="0.1" value="10.0">
     </div>
-    <div class="help-text">Used for the pitch-only fallback score (1–25 m). When 2D detection is locked, distance is irrelevant — scoring uses the detected target geometry directly.</div>
+    <div class="help-text">Used for the pitch-only fallback score (1–25 m). When 2D detection is locked, scoring uses the detected target geometry directly.</div>
 
     <div class="setting-row">
       <div class="setting-label">Aim point offset (sub-six hold) <span class="val" id="aimOffsetVal">−30 mm</span></div>
       <input type="range" id="aimOffset" min="-50" max="20" step="1" value="-30">
     </div>
-    <div class="help-text">Vertical distance from the front-sight tip to the intended pellet impact point. ISSF default is −30 mm (sub-six: tip below black). Use 0 for center hold.</div>
+    <div class="help-text">Vertical distance from the front-sight tip to the intended pellet impact point. ISSF default is −30 mm (sub-six). Use 0 for center hold.</div>
+
+    <div class="setting-row">
+      <div class="setting-label">Target overlay duration <span class="val" id="overlayDurVal">2.0 s</span></div>
+      <input type="range" id="overlayDur" min="1" max="8" step="0.5" value="2">
+    </div>
+    <div class="help-text">How long the full-screen target with shot marks stays visible after each shot. Tap DISMISS to close it earlier.</div>
 
     <div class="section-title">
       ZOOM
@@ -587,7 +596,7 @@
       <input type="range" id="zoomSlider" min="1" max="1" step="0.1" value="1" disabled>
     </div>
     <div class="preset-row" id="zoomPresets"></div>
-    <div class="help-text">Pinch the camera view to zoom, or use the slider. Zoom helps you see the target while keeping the sights readable.</div>
+    <div class="help-text">Pinch the camera view to zoom, or use the slider.</div>
 
     <div class="section-title">PITCH &amp; CALIBRATION</div>
     <button class="btn-primary" id="calibrateBtn2">⊕ CALIBRATE LEVEL NOW</button>
@@ -654,14 +663,13 @@
   <div id="startScreen">
     <div class="logo">▪ AIR PISTOL TRAINER ▪</div>
     <div class="title">Sight Picture Training</div>
-    <div class="version">v6 · 2D SCORING</div>
-    <div class="subtitle">True 2D scoring against the detected target. Pitch becomes a hold-quality indicator.</div>
+    <div class="version">v7 · SHOT MARKS ON TARGET</div>
+    <div class="subtitle">Full-screen target with shot marks after every release.</div>
     <button class="start-btn" id="startBtn">START CAMERA</button>
     <div class="instructions">
       Aim camera at target, <b>pinch</b> to zoom.<br>
       Open settings → <b>SELECT TARGET</b> → tap the center of the black.<br>
-      Green outline tracks the detected target.<br>
-      Tap <b>FIRE</b> at release for scored feedback.
+      Tap <b>FIRE</b> at release. Each shot opens the full-screen target with the new mark in red and earlier marks in grey.
     </div>
     <div id="errorMsg"></div>
   </div>
@@ -672,20 +680,36 @@
   const PELLET_RADIUS_MM = 2.25;
   const RING_10_RADIUS_MM = 5.75;
   const RING_STEP_MM = 8;
-  const REPLAY_DURATION_MS = 1900;
 
-  // ISSF 10m air pistol target geometry (mm)
+  // ISSF 10 m air pistol target geometry (mm)
   const BLACK_DIAMETER_MM = 59.5;
-  const RING_1_DIAMETER_MM = 155.5;          // outer scoring ring
-  const OUTER_RATIO = RING_1_DIAMETER_MM / BLACK_DIAMETER_MM; // ≈ 2.613
+  const RING_1_DIAMETER_MM = 155.5;
+  const OUTER_RATIO = RING_1_DIAMETER_MM / BLACK_DIAMETER_MM;
 
-  const DETECTION_INTERVAL_MS = 200;  // 5 Hz
-  const PROC_MAX_SIDE = 200;          // downscaled processing size
-  const ROI_HALF_FRACTION = 0.25;     // ROI radius as fraction of min(videoW, videoH)
+  // Ring radii in mm — index 0 unused, 1..10 valid; rings 7..10 are inside the black
+  const RING_RADII_MM = [
+    null,   // 0
+    77.75,  // 1
+    69.75,  // 2
+    61.75,  // 3
+    53.75,  // 4
+    45.75,  // 5
+    37.75,  // 6
+    29.75,  // 7 (= edge of black)
+    21.75,  // 8
+    13.75,  // 9
+    5.75    // 10
+  ];
+
+  const DETECTION_INTERVAL_MS = 200;
+  const PROC_MAX_SIDE = 200;
+  const ROI_HALF_FRACTION = 0.25;
   const MIN_BLOB_PIXELS = 40;
   const MAX_BBOX_ASPECT = 1.8;
-  const MIN_FILL_RATIO = 0.55;        // pixel_count / bbox_area — circle is ~0.785
-  const DETECTION_LOSS_FRAMES = 8;    // tolerate this many failed frames before clearing
+  const MIN_FILL_RATIO = 0.55;
+  const DETECTION_LOSS_FRAMES = 8;
+
+  const PITCH_HISTORY_MS = 1000;
 
   // ===== Config & state =====
   const defaults = {
@@ -695,8 +719,9 @@
     opacity: 100,
     sightRadius: 36,
     pitchEnabled: true,
-    targetDistance: 10,    // meters (used for pitch-only fallback)
-    aimOffsetMm: -30       // vertical mm from front-sight tip to intended impact (sub-six default)
+    targetDistance: 10,
+    aimOffsetMm: -30,
+    overlayDurSec: 2.0
   };
   let config = { ...defaults };
 
@@ -706,15 +731,14 @@
   let sessionShots = [];
   let audioCtx = null;
   let isReplaying = false;
+  let overlayTimer = null;
 
   // Orientation
   let zeroBeta = null;
   let rawBeta = null;
   let smoothedBeta = null;
   let orientationAttached = false;
-  // Short pitch history for hold-quality (timestamps + smoothed deltas, last ~1 s)
-  const PITCH_HISTORY_MS = 1000;
-  const pitchHistory = [];  // { t, delta } entries
+  const pitchHistory = [];
 
   // Zoom
   let zoomCaps = null;
@@ -723,28 +747,22 @@
   let pendingZoom = null;
   let zoomBubbleTimer = null;
 
-  // Touch (combined pinch + tap)
+  // Touch
   let pinchStartDist = null;
   let pinchStartZoom = null;
-  let singleTouch = null;  // { x, y, t, moved }
+  let singleTouch = null;
 
   // Detection
   const detection = {
-    enabled: false,        // detection loop running
-    tapMode: false,        // waiting for user to tap target center
-    targetTap: null,       // { x, y } last tap in CSS coords
-    roiCenter: null,       // { x, y } in CSS coords — where to center ROI next frame
-    lastResult: null,      // { ok, cx, cy, blackRadius, outerRadius } in CSS coords
-    failCount: 0,
-    loopId: null
+    enabled: false, tapMode: false,
+    targetTap: null, roiCenter: null,
+    lastResult: null, failCount: 0, loopId: null
   };
   const procCanvas = document.createElement('canvas');
   const procCtx = procCanvas.getContext('2d', { willReadFrequently: true });
 
   // ===== DOM refs =====
   const video = document.getElementById('video');
-  const canvas = document.getElementById('freezeCanvas');
-  const ctx = canvas.getContext('2d');
   const svgSights = document.getElementById('sightOverlay');
   const svgDetect = document.getElementById('detectionOverlay');
   const flash = document.getElementById('flash');
@@ -752,10 +770,6 @@
   const avgPillEl = document.getElementById('avgPill');
   const avgValueEl = document.getElementById('avgValue');
   const replayLabel = document.getElementById('replayLabel');
-  const shotResultEl = document.getElementById('shotResult');
-  const shotScoreEl = document.getElementById('shotScore');
-  const shotGradeEl = document.getElementById('shotGrade');
-  const shotDeviationEl = document.getElementById('shotDeviation');
   const fireBtn = document.getElementById('fireBtn');
   const pitchValueEl = document.getElementById('pitchValue');
   const pitchPillEl = document.getElementById('pitchPill');
@@ -774,11 +788,13 @@
   const detectLostBadge = document.getElementById('detectLostBadge');
   const distanceInput = document.getElementById('distanceInput');
   const distanceValEl = document.getElementById('distanceVal');
+  const targetOverlay = document.getElementById('targetOverlay');
+  const targetSvg = document.getElementById('targetSvg');
+  const targetCaption = document.getElementById('targetCaption');
+  const targetDismiss = document.getElementById('targetDismiss');
 
   // ===== Scoring =====
 
-  // Front-sight tip in screen coords (top-center of front post),
-  // including the live pitch-driven vertical offset.
   function getFrontSightTipScreen() {
     const w = svgSights.clientWidth;
     const h = svgSights.clientHeight;
@@ -808,18 +824,14 @@
     return 'MISS';
   }
 
-  // Compute the equivalent clock direction for an offset (in mm; sign of dy: +y = below center)
   function clockFromOffset(dxMm, dyMmDown) {
     if (Math.abs(dxMm) < 0.5 && Math.abs(dyMmDown) < 0.5) return null;
-    // Angle measured from "12 o'clock", clockwise. dy is positive going DOWN on screen.
-    let angle = Math.atan2(dxMm, -dyMmDown); // 0 = up, π/2 = right
+    let angle = Math.atan2(dxMm, -dyMmDown);
     if (angle < 0) angle += 2 * Math.PI;
     const hour = Math.round(angle / (2 * Math.PI) * 12);
-    return ((hour - 1 + 12) % 12) + 1;  // 1..12
+    return ((hour - 1 + 12) % 12) + 1;
   }
 
-  // 2D scoring against a locked target detection.
-  // Returns null if no detection is currently locked.
   function computeShot2D() {
     const det = detection.lastResult;
     if (!det || !det.ok || !det.blackRadius) return null;
@@ -827,46 +839,32 @@
     if (!tip) return null;
 
     const mmPerPx = (BLACK_DIAMETER_MM / 2) / det.blackRadius;
-    // Pixel offset from front-sight tip to target center (screen Y is inverted).
     const dxPx = tip.x - det.cx;
     const dyPxDown = tip.y - det.cy;
-    // Convert to mm at the target plane.
     const dxMm = dxPx * mmPerPx;
     const dyMmDown = dyPxDown * mmPerPx;
-    // Apply user-chosen aim offset (sub-six hold => front-sight tip is BELOW center,
-    // so positive dyMmDown corresponds to perfect aim when aimOffset = +|offset|.
-    // aimOffsetMm in config is signed: -30 mm (default) means "tip 30 mm below center is perfect"
-    // We translate the impact point: impact_dy = dyMmDown - (-aimOffsetMm) = dyMmDown + aimOffsetMm.
-    // When aimOffsetMm = -30 and dyMmDown = +30 (tip 30 mm below center) => impact_dy = 0. ✓
     const impactDxMm = dxMm;
     const impactDyMm = dyMmDown + config.aimOffsetMm;
     const distMm = Math.sqrt(impactDxMm * impactDxMm + impactDyMm * impactDyMm);
 
-    const score = scoreFromMm(distMm);
-    const grade = gradeFromScore(score);
-    const clock = clockFromOffset(impactDxMm, impactDyMm);
-
     return {
       mode: '2D',
-      score, grade,
+      score: scoreFromMm(distMm),
+      grade: gradeFromScore(scoreFromMm(distMm)),
       offsetMm: distMm,
       dxMm: impactDxMm,
       dyMm: impactDyMm,
-      clock,
-      mmPerPx,
-      hitX: det.cx + impactDxMm / mmPerPx,
-      hitY: det.cy + impactDyMm / mmPerPx
+      clock: clockFromOffset(impactDxMm, impactDyMm)
     };
   }
 
-  // Hold quality from pitch stability over the last ~500 ms (peak-to-peak in degrees).
   function computeHoldQuality() {
     const now = performance.now();
     const recent = pitchHistory.filter(p => now - p.t <= 500);
     if (recent.length < 4) return null;
     let lo = Infinity, hi = -Infinity;
     for (const p of recent) { if (p.delta < lo) lo = p.delta; if (p.delta > hi) hi = p.delta; }
-    const ptp = hi - lo;  // peak-to-peak pitch wobble (deg) over 500 ms
+    const ptp = hi - lo;
     let label;
     if (ptp < 0.15) label = 'STEADY';
     else if (ptp < 0.4) label = 'GOOD HOLD';
@@ -880,66 +878,136 @@
     const pitchRad = clampedPitch * Math.PI / 180;
     const distanceMm = config.targetDistance * 1000;
     const errorMm = Math.tan(pitchRad) * distanceMm;
-    const absError = Math.abs(errorMm);
-    const dAdj = Math.max(0, absError - PELLET_RADIUS_MM);
-
-    let score;
-    if (dAdj <= 0) score = 10.9;
-    else if (dAdj <= RING_10_RADIUS_MM) score = 10.9 - (dAdj / RING_10_RADIUS_MM) * 0.9;
-    else score = 10.0 - (dAdj - RING_10_RADIUS_MM) / RING_STEP_MM;
-    score = Math.max(0, score);
-
-    let grade;
-    if (score >= 10.0) grade = 'EXCELLENT';
-    else if (score >= 9.0) grade = 'GOOD';
-    else if (score >= 7.0) grade = 'FAIR';
-    else if (score >= 3.0) grade = 'POOR';
-    else grade = 'MISS';
-
+    const score = scoreFromMm(Math.abs(errorMm));
     return {
       mode: 'PITCH',
       pitchDelta: pitchDelta_deg,
-      errorMm, score, grade,
+      errorMm, score,
+      grade: gradeFromScore(score),
       direction: errorMm >= 0 ? 'HIGH' : 'LOW'
     };
   }
-
-  function showShotResult(shot) {
-    shotScoreEl.textContent = shot.score.toFixed(1);
-    shotGradeEl.textContent = shot.grade;
-
-    let html;
-    if (shot.mode === '2D') {
-      if (shot.offsetMm < 0.8) {
-        html = '<b>DEAD CENTER</b> · 2D';
-      } else {
-        const clockTxt = shot.clock ? (' · ' + shot.clock + ' o\u2032clock') : '';
-        html = '<b>' + shot.offsetMm.toFixed(1) + ' mm</b>' + clockTxt + ' · 2D';
-      }
-      if (shot.hold && shot.hold.label) {
-        html += '<br><span style="opacity:0.55">' + shot.hold.label + ' · ' +
-                shot.hold.ptp.toFixed(2) + '° wobble</span>';
-      }
-    } else {
-      const distLabel = config.targetDistance.toFixed(1) + ' m';
-      const absErr = Math.abs(shot.errorMm);
-      if (absErr < 0.5) {
-        html = '<b>DEAD CENTER</b> at ' + distLabel + ' · pitch only';
-      } else {
-        html = '<b>' + absErr.toFixed(1) + ' mm ' + shot.direction + '</b> at ' + distLabel + ' · pitch only';
-      }
-    }
-    shotDeviationEl.innerHTML = html;
-    shotResultEl.className = 'show grade-' + shot.grade.toLowerCase();
-    void shotResultEl.offsetWidth;
-  }
-  function hideShotResult() { shotResultEl.className = ''; }
 
   function updateSessionStats() {
     if (sessionShots.length === 0) { avgPillEl.style.display = 'none'; return; }
     const avg = sessionShots.reduce((s, x) => s + x.score, 0) / sessionShots.length;
     avgValueEl.textContent = avg.toFixed(2);
     avgPillEl.style.display = '';
+  }
+
+  // ===== Target overlay (full-screen with shot marks) =====
+
+  // Build static SVG content for the target. Coordinates: origin at center, +x right, +y down, units = mm.
+  // Target paper extends 85 mm in every direction (170 mm square).
+  function renderTargetSvg(latestShot) {
+    const cardSize = 85; // half-side of the target paper in mm
+    const parts = [];
+
+    // Paper card (off-white)
+    parts.push('<rect x="-' + cardSize + '" y="-' + cardSize + '" width="' + (2*cardSize) + '" height="' + (2*cardSize) + '" rx="2" fill="#f1ede0" />');
+
+    // Black aiming area (rings 7..10): one solid disc at ring-7 radius
+    parts.push('<circle cx="0" cy="0" r="' + RING_RADII_MM[7] + '" fill="#080808" />');
+
+    // Ring lines on white (rings 1..6) — thin black lines
+    for (let r = 1; r <= 6; r++) {
+      parts.push('<circle cx="0" cy="0" r="' + RING_RADII_MM[r] + '" fill="none" stroke="#0c0c0c" stroke-width="0.5" />');
+    }
+    // Ring lines on black (rings 8..10) — thin white lines so they're visible
+    for (let r = 8; r <= 10; r++) {
+      parts.push('<circle cx="0" cy="0" r="' + RING_RADII_MM[r] + '" fill="none" stroke="rgba(255,255,255,0.55)" stroke-width="0.4" />');
+    }
+    // Center dot
+    parts.push('<circle cx="0" cy="0" r="0.6" fill="rgba(255,255,255,0.6)" />');
+
+    // Ring numbers — only on the white rings (1..6) per ISSF convention.
+    // Place each number twice (top and bottom) midway between consecutive ring lines, on the vertical axis.
+    for (let r = 1; r <= 6; r++) {
+      const inner = RING_RADII_MM[r];
+      const outer = (r === 1) ? cardSize - 5 : RING_RADII_MM[r - 1];
+      const y = (inner + outer) / 2;
+      const fontSize = (r === 1) ? 5.5 : (r <= 3 ? 5.5 : 5);
+      parts.push(
+        '<text x="0" y="' + (-y) + '" text-anchor="middle" dominant-baseline="central" font-size="' + fontSize + '" font-family="Arial, sans-serif" font-weight="700" fill="#0c0c0c">' + r + '</text>' +
+        '<text x="0" y="' + (y) + '" text-anchor="middle" dominant-baseline="central" font-size="' + fontSize + '" font-family="Arial, sans-serif" font-weight="700" fill="#0c0c0c">' + r + '</text>'
+      );
+    }
+
+    // Shot marks. Render older shots first, latest on top.
+    sessionShots.forEach((shot, idx) => {
+      const isLatest = (shot === latestShot);
+      let cx, cy, isPitchOnly = false;
+      if (shot.mode === '2D') {
+        cx = shot.dxMm;
+        cy = shot.dyMm;
+      } else {
+        // Pitch-only: only vertical info. errorMm > 0 means HIGH (above center) → -y in SVG.
+        cx = 0;
+        cy = -shot.errorMm;
+        isPitchOnly = true;
+      }
+      // Clamp to within the paper for display
+      cx = Math.max(-cardSize + 1, Math.min(cardSize - 1, cx));
+      cy = Math.max(-cardSize + 1, Math.min(cardSize - 1, cy));
+
+      const fill = isLatest ? '#ff2a2a' : 'rgba(180,180,180,0.55)';
+      const stroke = isLatest ? '#ffffff' : 'rgba(255,255,255,0.55)';
+      const strokeW = isLatest ? 0.45 : 0.3;
+      const r = PELLET_RADIUS_MM;
+
+      if (isPitchOnly) {
+        // Render as a horizontal line spanning the paper at impact y, with a dot at x=0
+        const lineColor = isLatest ? 'rgba(255,42,42,0.5)' : 'rgba(180,180,180,0.3)';
+        parts.push('<line x1="' + (-cardSize+2) + '" y1="' + cy + '" x2="' + (cardSize-2) + '" y2="' + cy + '" stroke="' + lineColor + '" stroke-width="0.35" stroke-dasharray="2 2" />');
+      }
+      parts.push('<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="' + fill + '" stroke="' + stroke + '" stroke-width="' + strokeW + '" />');
+
+      // Shot number for latest only (small)
+      if (isLatest) {
+        parts.push('<text x="' + (cx + r + 1.5) + '" y="' + (cy - r - 1) + '" font-size="3" font-family="Arial, sans-serif" font-weight="800" fill="#ff2a2a" stroke="#fff" stroke-width="0.15" paint-order="stroke">' + sessionShots.length + '</text>');
+      }
+    });
+
+    targetSvg.innerHTML = parts.join('');
+  }
+
+  function showTargetOverlay(shot) {
+    renderTargetSvg(shot);
+
+    // Build caption
+    const grade = shot.grade.toLowerCase();
+    let captionHtml = '<span class="grade-tag ' + grade + '">' + shot.grade + '</span>' +
+                      '<span class="score-big">' + shot.score.toFixed(1) + '</span>';
+    let sub;
+    if (shot.mode === '2D') {
+      const off = shot.offsetMm;
+      const clockTxt = shot.clock ? ('  ·  ' + shot.clock + ' o\u2032clock') : '';
+      sub = (off < 0.8 ? 'DEAD CENTER' : (off.toFixed(1) + ' mm from center' + clockTxt)) + '  ·  2D';
+      if (shot.hold && shot.hold.label) {
+        sub += '  ·  ' + shot.hold.label + ' (' + shot.hold.ptp.toFixed(2) + '°)';
+      }
+    } else {
+      const distLabel = config.targetDistance.toFixed(1) + ' m';
+      const absErr = Math.abs(shot.errorMm);
+      sub = (absErr < 0.5
+        ? ('DEAD CENTER at ' + distLabel)
+        : (absErr.toFixed(1) + ' mm ' + shot.direction + ' at ' + distLabel)
+      ) + '  ·  pitch only';
+    }
+    captionHtml += '<span class="sub">' + sub + '</span>';
+    targetCaption.innerHTML = captionHtml;
+    targetCaption.className = grade;
+
+    targetOverlay.classList.add('show');
+
+    if (overlayTimer) { clearTimeout(overlayTimer); overlayTimer = null; }
+    overlayTimer = setTimeout(hideTargetOverlay, config.overlayDurSec * 1000);
+  }
+
+  function hideTargetOverlay() {
+    if (overlayTimer) { clearTimeout(overlayTimer); overlayTimer = null; }
+    targetOverlay.classList.remove('show');
+    isReplaying = false;
   }
 
   // ===== Sight rendering =====
@@ -976,14 +1044,14 @@
     const frontOffsetY = -pitchDeltaDeg * pitchPerDeg;
 
     const rearPath = [
-      `M ${cx - rearW/2} ${topY}`,
-      `L ${cx - effNotchW/2} ${topY}`,
-      `L ${cx - effNotchW/2} ${baseTopY}`,
-      `L ${cx + effNotchW/2} ${baseTopY}`,
-      `L ${cx + effNotchW/2} ${topY}`,
-      `L ${cx + rearW/2} ${topY}`,
-      `L ${cx + rearW/2} ${bottomY}`,
-      `L ${cx - rearW/2} ${bottomY}`,
+      'M ' + (cx - rearW/2) + ' ' + topY,
+      'L ' + (cx - effNotchW/2) + ' ' + topY,
+      'L ' + (cx - effNotchW/2) + ' ' + baseTopY,
+      'L ' + (cx + effNotchW/2) + ' ' + baseTopY,
+      'L ' + (cx + effNotchW/2) + ' ' + topY,
+      'L ' + (cx + rearW/2) + ' ' + topY,
+      'L ' + (cx + rearW/2) + ' ' + bottomY,
+      'L ' + (cx - rearW/2) + ' ' + bottomY,
       'Z'
     ].join(' ');
 
@@ -991,12 +1059,11 @@
     const frontTopY = topY + frontOffsetY;
     const op = config.opacity / 100;
 
-    svgSights.innerHTML = `
-      <g opacity="${op}">
-        <path d="${rearPath}" fill="#000" stroke="rgba(255,255,255,0.55)" stroke-width="2" stroke-linejoin="miter"/>
-        <rect x="${frontX}" y="${frontTopY}" width="${frontW}" height="${frontH}" fill="#000" stroke="rgba(255,255,255,0.55)" stroke-width="2"/>
-      </g>
-    `;
+    svgSights.innerHTML =
+      '<g opacity="' + op + '">' +
+        '<path d="' + rearPath + '" fill="#000" stroke="rgba(255,255,255,0.55)" stroke-width="2" stroke-linejoin="miter"/>' +
+        '<rect x="' + frontX + '" y="' + frontTopY + '" width="' + frontW + '" height="' + frontH + '" fill="#000" stroke="rgba(255,255,255,0.55)" stroke-width="2"/>' +
+      '</g>';
   }
 
   function drawDetection() {
@@ -1004,19 +1071,14 @@
     if (!r || !r.ok) { svgDetect.innerHTML = ''; return; }
     const RING_STROKE = '#55ff88';
     const reticleR = Math.max(8, r.blackRadius * 0.15);
-    svgDetect.innerHTML = `
-      <g opacity="0.85">
-        <circle cx="${r.cx}" cy="${r.cy}" r="${r.outerRadius}"
-                fill="none" stroke="${RING_STROKE}" stroke-width="1.5" stroke-dasharray="6 5" opacity="0.7"/>
-        <circle cx="${r.cx}" cy="${r.cy}" r="${r.blackRadius}"
-                fill="none" stroke="${RING_STROKE}" stroke-width="2"/>
-        <line x1="${r.cx - reticleR}" y1="${r.cy}" x2="${r.cx + reticleR}" y2="${r.cy}"
-              stroke="${RING_STROKE}" stroke-width="1.5"/>
-        <line x1="${r.cx}" y1="${r.cy - reticleR}" x2="${r.cx}" y2="${r.cy + reticleR}"
-              stroke="${RING_STROKE}" stroke-width="1.5"/>
-        <circle cx="${r.cx}" cy="${r.cy}" r="2.5" fill="${RING_STROKE}"/>
-      </g>
-    `;
+    svgDetect.innerHTML =
+      '<g opacity="0.85">' +
+        '<circle cx="' + r.cx + '" cy="' + r.cy + '" r="' + r.outerRadius + '" fill="none" stroke="' + RING_STROKE + '" stroke-width="1.5" stroke-dasharray="6 5" opacity="0.7"/>' +
+        '<circle cx="' + r.cx + '" cy="' + r.cy + '" r="' + r.blackRadius + '" fill="none" stroke="' + RING_STROKE + '" stroke-width="2"/>' +
+        '<line x1="' + (r.cx - reticleR) + '" y1="' + r.cy + '" x2="' + (r.cx + reticleR) + '" y2="' + r.cy + '" stroke="' + RING_STROKE + '" stroke-width="1.5"/>' +
+        '<line x1="' + r.cx + '" y1="' + (r.cy - reticleR) + '" x2="' + r.cx + '" y2="' + (r.cy + reticleR) + '" stroke="' + RING_STROKE + '" stroke-width="1.5"/>' +
+        '<circle cx="' + r.cx + '" cy="' + r.cy + '" r="2.5" fill="' + RING_STROKE + '"/>' +
+      '</g>';
   }
 
   function setupResize() {
@@ -1033,19 +1095,13 @@
     document.getElementById('errorMsg').textContent = '';
     try {
       stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: { ideal: 'environment' },
-          width:  { ideal: 1920 },
-          height: { ideal: 1080 }
-        },
+        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
         audio: false
       });
       video.srcObject = stream;
       await video.play();
-
       videoTrack = stream.getVideoTracks()[0];
       initZoom();
-
       document.getElementById('startScreen').style.display = 'none';
       fireBtn.disabled = false;
       setTimeout(drawSights, 100);
@@ -1060,26 +1116,19 @@
   // ===== Zoom =====
 
   function initZoom() {
-    zoomCaps = null;
-    currentZoom = 1;
+    zoomCaps = null; currentZoom = 1;
     const supBadge = document.getElementById('zoomSupportedBadge');
     const noBadge  = document.getElementById('zoomUnsupportedBadge');
-
     if (!videoTrack || typeof videoTrack.getCapabilities !== 'function') {
-      noBadge.style.display = 'inline-block';
-      zoomSlider.disabled = true; return;
+      noBadge.style.display = 'inline-block'; zoomSlider.disabled = true; return;
     }
     const caps = videoTrack.getCapabilities();
-    if (!caps || !caps.zoom ||
-        typeof caps.zoom.min !== 'number' || typeof caps.zoom.max !== 'number' ||
-        caps.zoom.max <= caps.zoom.min) {
-      noBadge.style.display = 'inline-block';
-      zoomSlider.disabled = true; return;
+    if (!caps || !caps.zoom || typeof caps.zoom.min !== 'number' || typeof caps.zoom.max !== 'number' || caps.zoom.max <= caps.zoom.min) {
+      noBadge.style.display = 'inline-block'; zoomSlider.disabled = true; return;
     }
     zoomCaps = { min: caps.zoom.min, max: caps.zoom.max, step: caps.zoom.step || 0.1 };
     const settings = videoTrack.getSettings();
     currentZoom = (typeof settings.zoom === 'number') ? settings.zoom : zoomCaps.min;
-
     zoomPill.style.display = '';
     zoomSlider.min = String(zoomCaps.min);
     zoomSlider.max = String(zoomCaps.max);
@@ -1087,7 +1136,6 @@
     zoomSlider.value = String(currentZoom);
     zoomSlider.disabled = false;
     supBadge.style.display = 'inline-block';
-
     buildZoomPresets();
     updateZoomDisplay(false);
   }
@@ -1099,7 +1147,7 @@
     candidates.add(roundTo(zoomCaps.min, zoomCaps.step));
     [2, 3, 5].forEach(v => { if (v > zoomCaps.min && v < zoomCaps.max) candidates.add(v); });
     candidates.add(roundTo(zoomCaps.max, zoomCaps.step));
-    [...candidates].sort((a,b) => a-b).forEach(v => {
+    [...candidates].sort((a,b)=>a-b).forEach(v => {
       const btn = document.createElement('button');
       btn.className = 'preset-btn';
       btn.textContent = formatZoom(v);
@@ -1107,7 +1155,6 @@
       zoomPresets.appendChild(btn);
     });
   }
-
   function roundTo(value, step) { return step ? Math.round(value / step) * step : value; }
   function formatZoom(v) { return v.toFixed(v < 10 ? 1 : 0) + '×'; }
 
@@ -1125,7 +1172,6 @@
       const p = pendingZoom; pendingZoom = null; applyZoom(p);
     } else { pendingZoom = null; }
   }
-
   function updateZoomDisplay(showBubble) {
     const txt = formatZoom(currentZoom);
     zoomValueEl.textContent = txt;
@@ -1140,21 +1186,20 @@
   }
   function resetZoom() { if (zoomCaps) applyZoom(zoomCaps.min); }
 
-  // ===== Touch (pinch + tap) =====
+  // ===== Touch =====
 
   function touchDistance(touches) {
     const dx = touches[0].clientX - touches[1].clientX;
     const dy = touches[0].clientY - touches[1].clientY;
-    return Math.sqrt(dx * dx + dy * dy);
+    return Math.sqrt(dx*dx + dy*dy);
   }
-
   function onTouchStart(e) {
     if (e.touches.length === 1) {
       const t = e.touches[0];
       singleTouch = { x: t.clientX, y: t.clientY, t: Date.now(), moved: false };
     }
     if (e.touches.length === 2) {
-      singleTouch = null; // cancel any pending tap
+      singleTouch = null;
       if (zoomCaps && !detection.tapMode) {
         pinchStartDist = touchDistance(e.touches);
         pinchStartZoom = currentZoom;
@@ -1184,14 +1229,11 @@
   function onTouchEnd(e) {
     if (singleTouch && e.touches.length === 0) {
       const elapsed = Date.now() - singleTouch.t;
-      if (elapsed < 350 && !singleTouch.moved) {
-        handleSingleTap(singleTouch.x, singleTouch.y);
-      }
+      if (elapsed < 350 && !singleTouch.moved) handleSingleTap(singleTouch.x, singleTouch.y);
     }
     if (e.touches.length < 2) { pinchStartDist = null; pinchStartZoom = null; }
     if (e.touches.length === 0) singleTouch = null;
   }
-
   function handleSingleTap(x, y) {
     if (detection.tapMode) {
       detection.targetTap = { x, y };
@@ -1201,15 +1243,12 @@
       startDetectionLoop();
     }
   }
-
-  // Mouse fallback (for desktop testing when in tap mode)
   function onMouseClick(e) {
     if (!detection.tapMode) return;
-    const rect = video.getBoundingClientRect();
     handleSingleTap(e.clientX, e.clientY);
   }
 
-  // ===== Target detection =====
+  // ===== Detection =====
 
   function enterTapMode() {
     detection.tapMode = true;
@@ -1220,7 +1259,6 @@
     detection.tapMode = false;
     tapHint.classList.remove('show');
   }
-
   function startDetectionLoop() {
     detection.enabled = true;
     stopDetectBtn.style.display = '';
@@ -1243,83 +1281,63 @@
     detectLostBadge.style.display = 'none';
     drawDetection();
   }
-
   function runDetectionTick() {
     try {
       const result = detectTarget();
       if (result && result.ok) {
         detection.lastResult = result;
-        detection.roiCenter = { x: result.cx, y: result.cy }; // track
+        detection.roiCenter = { x: result.cx, y: result.cy };
         detection.failCount = 0;
       } else {
         detection.failCount++;
-        if (detection.failCount > DETECTION_LOSS_FRAMES) {
-          detection.lastResult = null;
-        }
+        if (detection.failCount > DETECTION_LOSS_FRAMES) detection.lastResult = null;
       }
       drawDetection();
       updateDetectionStatus();
-    } catch (err) {
-      console.warn('Detection tick error:', err);
-    }
+    } catch (err) { console.warn('Detection tick error:', err); }
   }
-
   function updateDetectionStatus() {
     const locked = detection.lastResult && detection.lastResult.ok;
     if (locked) {
-      detectPill.classList.add('lock');
-      detectPill.classList.remove('lost');
+      detectPill.classList.add('lock'); detectPill.classList.remove('lost');
       detectValueEl.textContent = 'LOCK';
       detectLockBadge.style.display = 'inline-block';
       detectLostBadge.style.display = 'none';
     } else {
-      detectPill.classList.remove('lock');
-      detectPill.classList.add('lost');
+      detectPill.classList.remove('lock'); detectPill.classList.add('lost');
       detectValueEl.textContent = '…';
       detectLockBadge.style.display = 'none';
       detectLostBadge.style.display = 'inline-block';
     }
   }
-
   function otsuThreshold(gray) {
     const hist = new Uint32Array(256);
     for (let i = 0; i < gray.length; i++) hist[gray[i]]++;
     const total = gray.length;
-    let sum = 0;
-    for (let i = 0; i < 256; i++) sum += i * hist[i];
+    let sum = 0; for (let i = 0; i < 256; i++) sum += i * hist[i];
     let sumB = 0, wB = 0, wF, varMax = 0, threshold = 128;
     for (let t = 0; t < 256; t++) {
       wB += hist[t]; if (wB === 0) continue;
       wF = total - wB; if (wF === 0) break;
       sumB += t * hist[t];
-      const mB = sumB / wB;
-      const mF = (sum - sumB) / wF;
+      const mB = sumB / wB, mF = (sum - sumB) / wF;
       const varBetween = wB * wF * (mB - mF) * (mB - mF);
       if (varBetween > varMax) { varMax = varBetween; threshold = t; }
     }
     return threshold;
   }
-
   function detectTarget() {
     if (!video.videoWidth || !video.videoHeight) return { ok: false };
     const seedScreen = detection.roiCenter || detection.targetTap;
     if (!seedScreen) return { ok: false };
-
     const vw = video.videoWidth, vh = video.videoHeight;
     const dispW = svgSights.clientWidth, dispH = svgSights.clientHeight;
     if (!dispW || !dispH) return { ok: false };
-
-    // object-fit: cover transform
     const scaleCover = Math.max(dispW / vw, dispH / vh);
-    const displayedVW = vw * scaleCover;
-    const displayedVH = vh * scaleCover;
-    const offsetX = (displayedVW - dispW) / 2;
-    const offsetY = (displayedVH - dispH) / 2;
-
-    // screen -> video coords
+    const offsetX = (vw * scaleCover - dispW) / 2;
+    const offsetY = (vh * scaleCover - dispH) / 2;
     const seedVX = (seedScreen.x + offsetX) / scaleCover;
     const seedVY = (seedScreen.y + offsetY) / scaleCover;
-
     const roiRadiusV = Math.min(vw, vh) * ROI_HALF_FRACTION;
     const roiX0 = Math.max(0, Math.floor(seedVX - roiRadiusV));
     const roiY0 = Math.max(0, Math.floor(seedVY - roiRadiusV));
@@ -1327,33 +1345,23 @@
     const roiY1 = Math.min(vh, Math.ceil(seedVY + roiRadiusV));
     const roiW = roiX1 - roiX0, roiH = roiY1 - roiY0;
     if (roiW < 20 || roiH < 20) return { ok: false };
-
-    // downscale to PROC_MAX_SIDE
     const procScale = PROC_MAX_SIDE / Math.max(roiW, roiH);
     const procW = Math.max(1, Math.round(roiW * procScale));
     const procH = Math.max(1, Math.round(roiH * procScale));
-    procCanvas.width = procW;
-    procCanvas.height = procH;
-    try {
-      procCtx.drawImage(video, roiX0, roiY0, roiW, roiH, 0, 0, procW, procH);
-    } catch (e) { return { ok: false }; }
-
+    procCanvas.width = procW; procCanvas.height = procH;
+    try { procCtx.drawImage(video, roiX0, roiY0, roiW, roiH, 0, 0, procW, procH); }
+    catch (e) { return { ok: false }; }
     let imgData;
     try { imgData = procCtx.getImageData(0, 0, procW, procH); }
     catch (e) { return { ok: false }; }
     const data = imgData.data;
-
     const gray = new Uint8Array(procW * procH);
     for (let i = 0, p = 0; i < gray.length; i++, p += 4) {
       gray[i] = (data[p] * 299 + data[p+1] * 587 + data[p+2] * 114) / 1000 | 0;
     }
     const threshold = otsuThreshold(gray);
-
-    // Seed in proc coords
     const seedPX = Math.round((seedVX - roiX0) * procScale);
     const seedPY = Math.round((seedVY - roiY0) * procScale);
-
-    // Find nearest dark pixel to seed
     let sx = -1, sy = -1, bestD2 = Infinity;
     const R = 20;
     for (let dy = -R; dy <= R; dy++) {
@@ -1367,8 +1375,6 @@
       }
     }
     if (sx < 0) return { ok: false };
-
-    // Flood fill (iterative, 4-connectivity)
     const visited = new Uint8Array(procW * procH);
     const stackX = [sx], stackY = [sy];
     visited[sy * procW + sx] = 1;
@@ -1380,61 +1386,32 @@
       sumX += x; sumY += y; count++;
       if (x < minX) minX = x; else if (x > maxX) maxX = x;
       if (y < minY) minY = y; else if (y > maxY) maxY = y;
-      // 4-neighbors
-      if (x > 0) {
-        const i = y * procW + (x - 1);
-        if (!visited[i] && gray[i] < threshold) { visited[i] = 1; stackX.push(x - 1); stackY.push(y); }
-      }
-      if (x < procW - 1) {
-        const i = y * procW + (x + 1);
-        if (!visited[i] && gray[i] < threshold) { visited[i] = 1; stackX.push(x + 1); stackY.push(y); }
-      }
-      if (y > 0) {
-        const i = (y - 1) * procW + x;
-        if (!visited[i] && gray[i] < threshold) { visited[i] = 1; stackX.push(x); stackY.push(y - 1); }
-      }
-      if (y < procH - 1) {
-        const i = (y + 1) * procW + x;
-        if (!visited[i] && gray[i] < threshold) { visited[i] = 1; stackX.push(x); stackY.push(y + 1); }
-      }
+      if (x > 0)            { const i = y*procW + (x-1); if (!visited[i] && gray[i] < threshold) { visited[i] = 1; stackX.push(x-1); stackY.push(y); } }
+      if (x < procW - 1)    { const i = y*procW + (x+1); if (!visited[i] && gray[i] < threshold) { visited[i] = 1; stackX.push(x+1); stackY.push(y); } }
+      if (y > 0)            { const i = (y-1)*procW + x; if (!visited[i] && gray[i] < threshold) { visited[i] = 1; stackX.push(x); stackY.push(y-1); } }
+      if (y < procH - 1)    { const i = (y+1)*procW + x; if (!visited[i] && gray[i] < threshold) { visited[i] = 1; stackX.push(x); stackY.push(y+1); } }
     }
-
-    // Sanity checks
     if (count < MIN_BLOB_PIXELS) return { ok: false };
-    const bboxW = maxX - minX + 1;
-    const bboxH = maxY - minY + 1;
+    const bboxW = maxX - minX + 1, bboxH = maxY - minY + 1;
     const aspect = Math.max(bboxW / bboxH, bboxH / bboxW);
     if (aspect > MAX_BBOX_ASPECT) return { ok: false };
     const fillRatio = count / (bboxW * bboxH);
     if (fillRatio < MIN_FILL_RATIO) return { ok: false };
-    // Reject if the blob hits more than one ROI edge (likely clipped; bad fit)
     let edgeHits = 0;
     if (minX <= 1) edgeHits++;
     if (minY <= 1) edgeHits++;
     if (maxX >= procW - 2) edgeHits++;
     if (maxY >= procH - 2) edgeHits++;
     if (edgeHits >= 2) return { ok: false };
-
-    const cxP = sumX / count;
-    const cyP = sumY / count;
+    const cxP = sumX / count, cyP = sumY / count;
     const equivR = Math.sqrt(count / Math.PI);
-
-    // proc -> video
     const videoCX = cxP / procScale + roiX0;
     const videoCY = cyP / procScale + roiY0;
     const videoR  = equivR / procScale;
-    // video -> screen (css)
     const cssCX = videoCX * scaleCover - offsetX;
     const cssCY = videoCY * scaleCover - offsetY;
     const cssR  = videoR * scaleCover;
-
-    return {
-      ok: true,
-      cx: cssCX, cy: cssCY,
-      blackRadius: cssR,
-      outerRadius: cssR * OUTER_RATIO,
-      fillRatio
-    };
+    return { ok: true, cx: cssCX, cy: cssCY, blackRadius: cssR, outerRadius: cssR * OUTER_RATIO, fillRatio };
   }
 
   // ===== Orientation =====
@@ -1442,8 +1419,7 @@
   async function attachOrientation() {
     if (orientationAttached) return;
     try {
-      if (typeof DeviceOrientationEvent !== 'undefined' &&
-          typeof DeviceOrientationEvent.requestPermission === 'function') {
+      if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
         const response = await DeviceOrientationEvent.requestPermission();
         if (response !== 'granted') return;
       }
@@ -1457,14 +1433,9 @@
     const alpha = 0.35;
     smoothedBeta = (smoothedBeta === null) ? rawBeta : smoothedBeta * (1 - alpha) + rawBeta * alpha;
     if (zeroBeta === null) zeroBeta = smoothedBeta;
-
-    // Append to pitch history & evict old entries
     const now = performance.now();
     pitchHistory.push({ t: now, delta: smoothedBeta - zeroBeta });
-    while (pitchHistory.length && now - pitchHistory[0].t > PITCH_HISTORY_MS) {
-      pitchHistory.shift();
-    }
-
+    while (pitchHistory.length && now - pitchHistory[0].t > PITCH_HISTORY_MS) pitchHistory.shift();
     updatePitchDisplay();
     drawSights();
   }
@@ -1514,20 +1485,9 @@
     if (isReplaying || !stream) return;
     isReplaying = true;
 
-    // Prefer 2D scoring against the locked target. Fall back to pitch-only.
     let shot = computeShot2D();
-    if (shot) {
-      shot.hold = computeHoldQuality();
-    } else if (isPitchLive()) {
-      shot = computeShotFromPitch(smoothedBeta - zeroBeta);
-    }
-
-    const vw = video.videoWidth, vh = video.videoHeight;
-    if (vw && vh) {
-      canvas.width = vw; canvas.height = vh;
-      ctx.drawImage(video, 0, 0, vw, vh);
-      canvas.style.display = 'block';
-    }
+    if (shot) shot.hold = computeHoldQuality();
+    else if (isPitchLive()) shot = computeShotFromPitch(smoothedBeta - zeroBeta);
 
     flash.classList.add('on');
     setTimeout(() => flash.classList.remove('on'), 90);
@@ -1537,15 +1497,19 @@
     shotCount++;
     counterEl.textContent = shotCount;
 
-    if (shot) { sessionShots.push(shot); updateSessionStats(); showShotResult(shot); }
-    else { replayLabel.classList.add('show'); }
-
-    setTimeout(() => {
-      canvas.style.display = 'none';
-      replayLabel.classList.remove('show');
-      hideShotResult();
-      isReplaying = false;
-    }, REPLAY_DURATION_MS);
+    if (shot) {
+      sessionShots.push(shot);
+      updateSessionStats();
+      // Brief delay so the camera flash effect is visible before the target appears
+      setTimeout(() => showTargetOverlay(shot), 120);
+    } else {
+      // No score available — just show the plain release badge
+      replayLabel.classList.add('show');
+      setTimeout(() => {
+        replayLabel.classList.remove('show');
+        isReplaying = false;
+      }, 1200);
+    }
   }
 
   function resetSession() {
@@ -1553,6 +1517,7 @@
     sessionShots = [];
     counterEl.textContent = 0;
     updateSessionStats();
+    hideTargetOverlay();
   }
 
   // ===== Settings =====
@@ -1565,6 +1530,7 @@
       const sign = val < 0 ? '\u2212' : (val > 0 ? '+' : '');
       el.textContent = sign + Math.abs(val) + ' mm';
     }
+    else if (key === 'overlayDur') el.textContent = parseFloat(val).toFixed(1) + ' s';
     else el.textContent = val;
   }
 
@@ -1585,7 +1551,6 @@
     pitchToggle.checked = config.pitchEnabled;
     pitchToggle.onchange = () => { config.pitchEnabled = pitchToggle.checked; drawSights(); };
 
-    // Aim point offset
     const aimEl = document.getElementById('aimOffset');
     const aimValEl = document.getElementById('aimOffsetVal');
     aimEl.value = config.aimOffsetMm;
@@ -1595,13 +1560,20 @@
       updateValLabel('aimOffset', config.aimOffsetMm, aimValEl);
     };
 
-    // Distance
+    const ovEl = document.getElementById('overlayDur');
+    const ovValEl = document.getElementById('overlayDurVal');
+    ovEl.value = config.overlayDurSec;
+    updateValLabel('overlayDur', config.overlayDurSec, ovValEl);
+    ovEl.oninput = () => {
+      config.overlayDurSec = parseFloat(ovEl.value);
+      updateValLabel('overlayDur', config.overlayDurSec, ovValEl);
+    };
+
     distanceInput.value = config.targetDistance.toFixed(1);
     updateDistanceLabel();
     distanceInput.addEventListener('input', onDistanceInput);
     distanceInput.addEventListener('change', onDistanceInput);
   }
-
   function onDistanceInput() {
     let v = parseFloat(distanceInput.value);
     if (isNaN(v)) return;
@@ -1612,11 +1584,11 @@
   function updateDistanceLabel() {
     distanceValEl.textContent = config.targetDistance.toFixed(1) + ' m';
   }
-
   function resetSights() {
     const keepDist = config.targetDistance;
     const keepAim = config.aimOffsetMm;
-    config = { ...defaults, targetDistance: keepDist, aimOffsetMm: keepAim };
+    const keepOverlay = config.overlayDurSec;
+    config = { ...defaults, targetDistance: keepDist, aimOffsetMm: keepAim, overlayDurSec: keepOverlay };
     bindSettings();
     drawSights();
   }
@@ -1633,7 +1605,7 @@
   });
   document.getElementById('resetBtn').addEventListener('click', () => {
     if (shotCount === 0) return;
-    if (confirm('Reset session (shot counter and average) to zero?')) resetSession();
+    if (confirm('Reset session — clears shot counter, average, and shot marks. Continue?')) resetSession();
   });
   document.getElementById('resetSights').addEventListener('click', resetSights);
   document.getElementById('calibrateBtn').addEventListener('click', calibrateLevel);
@@ -1646,17 +1618,16 @@
   stopDetectBtn.addEventListener('click', stopDetectionLoop);
   detectPill.addEventListener('click', enterTapMode);
 
-  // Touch on the main camera area
+  targetDismiss.addEventListener('click', hideTargetOverlay);
+
   [video, svgDetect, svgSights].forEach(el => {
     el.addEventListener('touchstart', onTouchStart, { passive: false });
     el.addEventListener('touchmove',  onTouchMove,  { passive: false });
     el.addEventListener('touchend',   onTouchEnd);
     el.addEventListener('touchcancel', onTouchEnd);
   });
-  // Mouse fallback for desktop testing (only used for tap-target-center mode)
   video.addEventListener('click', onMouseClick);
 
-  // Spacebar fire for desktop testing
   document.addEventListener('keydown', (e) => {
     if (e.code === 'Space' && !e.repeat && !fireBtn.disabled) {
       e.preventDefault(); fire();
