@@ -569,7 +569,13 @@
       <div class="setting-label">Target distance <span class="val" id="distanceVal">10.0 m</span></div>
       <input type="number" id="distanceInput" min="1" max="25" step="0.1" value="10.0">
     </div>
-    <div class="help-text">Used for shot scoring (1–25 m). Default is 10 m for standard ISSF air pistol.</div>
+    <div class="help-text">Used for the pitch-only fallback score (1–25 m). When 2D detection is locked, distance is irrelevant — scoring uses the detected target geometry directly.</div>
+
+    <div class="setting-row">
+      <div class="setting-label">Aim point offset (sub-six hold) <span class="val" id="aimOffsetVal">−30 mm</span></div>
+      <input type="range" id="aimOffset" min="-50" max="20" step="1" value="-30">
+    </div>
+    <div class="help-text">Vertical distance from the front-sight tip to the intended pellet impact point. ISSF default is −30 mm (sub-six: tip below black). Use 0 for center hold.</div>
 
     <div class="section-title">
       ZOOM
@@ -648,8 +654,8 @@
   <div id="startScreen">
     <div class="logo">▪ AIR PISTOL TRAINER ▪</div>
     <div class="title">Sight Picture Training</div>
-    <div class="version">v5 · TARGET DETECTION</div>
-    <div class="subtitle">Auto-locate the target. Visual feedback only in this version — scoring still uses pitch.</div>
+    <div class="version">v6 · 2D SCORING</div>
+    <div class="subtitle">True 2D scoring against the detected target. Pitch becomes a hold-quality indicator.</div>
     <button class="start-btn" id="startBtn">START CAMERA</button>
     <div class="instructions">
       Aim camera at target, <b>pinch</b> to zoom.<br>
@@ -689,7 +695,8 @@
     opacity: 100,
     sightRadius: 36,
     pitchEnabled: true,
-    targetDistance: 10   // meters
+    targetDistance: 10,    // meters (used for pitch-only fallback)
+    aimOffsetMm: -30       // vertical mm from front-sight tip to intended impact (sub-six default)
   };
   let config = { ...defaults };
 
@@ -705,6 +712,9 @@
   let rawBeta = null;
   let smoothedBeta = null;
   let orientationAttached = false;
+  // Short pitch history for hold-quality (timestamps + smoothed deltas, last ~1 s)
+  const PITCH_HISTORY_MS = 1000;
+  const pitchHistory = [];  // { t, delta } entries
 
   // Zoom
   let zoomCaps = null;
@@ -767,6 +777,104 @@
 
   // ===== Scoring =====
 
+  // Front-sight tip in screen coords (top-center of front post),
+  // including the live pitch-driven vertical offset.
+  function getFrontSightTipScreen() {
+    const w = svgSights.clientWidth;
+    const h = svgSights.clientHeight;
+    if (!w || !h) return null;
+    const cx = w / 2 + (config.hPos / 100) * w;
+    const cy = (config.vPos / 100) * h;
+    const pitchDeltaDeg = getPitchDelta();
+    const pitchPerDeg = 0.03 * (config.sightRadius / 36) * h;
+    const frontOffsetY = -pitchDeltaDeg * pitchPerDeg;
+    return { x: cx, y: cy + frontOffsetY };
+  }
+
+  function scoreFromMm(distanceMm) {
+    const dAdj = Math.max(0, distanceMm - PELLET_RADIUS_MM);
+    let score;
+    if (dAdj <= 0) score = 10.9;
+    else if (dAdj <= RING_10_RADIUS_MM) score = 10.9 - (dAdj / RING_10_RADIUS_MM) * 0.9;
+    else score = 10.0 - (dAdj - RING_10_RADIUS_MM) / RING_STEP_MM;
+    return Math.max(0, score);
+  }
+
+  function gradeFromScore(score) {
+    if (score >= 10.0) return 'EXCELLENT';
+    if (score >=  9.0) return 'GOOD';
+    if (score >=  7.0) return 'FAIR';
+    if (score >=  3.0) return 'POOR';
+    return 'MISS';
+  }
+
+  // Compute the equivalent clock direction for an offset (in mm; sign of dy: +y = below center)
+  function clockFromOffset(dxMm, dyMmDown) {
+    if (Math.abs(dxMm) < 0.5 && Math.abs(dyMmDown) < 0.5) return null;
+    // Angle measured from "12 o'clock", clockwise. dy is positive going DOWN on screen.
+    let angle = Math.atan2(dxMm, -dyMmDown); // 0 = up, π/2 = right
+    if (angle < 0) angle += 2 * Math.PI;
+    const hour = Math.round(angle / (2 * Math.PI) * 12);
+    return ((hour - 1 + 12) % 12) + 1;  // 1..12
+  }
+
+  // 2D scoring against a locked target detection.
+  // Returns null if no detection is currently locked.
+  function computeShot2D() {
+    const det = detection.lastResult;
+    if (!det || !det.ok || !det.blackRadius) return null;
+    const tip = getFrontSightTipScreen();
+    if (!tip) return null;
+
+    const mmPerPx = (BLACK_DIAMETER_MM / 2) / det.blackRadius;
+    // Pixel offset from front-sight tip to target center (screen Y is inverted).
+    const dxPx = tip.x - det.cx;
+    const dyPxDown = tip.y - det.cy;
+    // Convert to mm at the target plane.
+    const dxMm = dxPx * mmPerPx;
+    const dyMmDown = dyPxDown * mmPerPx;
+    // Apply user-chosen aim offset (sub-six hold => front-sight tip is BELOW center,
+    // so positive dyMmDown corresponds to perfect aim when aimOffset = +|offset|.
+    // aimOffsetMm in config is signed: -30 mm (default) means "tip 30 mm below center is perfect"
+    // We translate the impact point: impact_dy = dyMmDown - (-aimOffsetMm) = dyMmDown + aimOffsetMm.
+    // When aimOffsetMm = -30 and dyMmDown = +30 (tip 30 mm below center) => impact_dy = 0. ✓
+    const impactDxMm = dxMm;
+    const impactDyMm = dyMmDown + config.aimOffsetMm;
+    const distMm = Math.sqrt(impactDxMm * impactDxMm + impactDyMm * impactDyMm);
+
+    const score = scoreFromMm(distMm);
+    const grade = gradeFromScore(score);
+    const clock = clockFromOffset(impactDxMm, impactDyMm);
+
+    return {
+      mode: '2D',
+      score, grade,
+      offsetMm: distMm,
+      dxMm: impactDxMm,
+      dyMm: impactDyMm,
+      clock,
+      mmPerPx,
+      hitX: det.cx + impactDxMm / mmPerPx,
+      hitY: det.cy + impactDyMm / mmPerPx
+    };
+  }
+
+  // Hold quality from pitch stability over the last ~500 ms (peak-to-peak in degrees).
+  function computeHoldQuality() {
+    const now = performance.now();
+    const recent = pitchHistory.filter(p => now - p.t <= 500);
+    if (recent.length < 4) return null;
+    let lo = Infinity, hi = -Infinity;
+    for (const p of recent) { if (p.delta < lo) lo = p.delta; if (p.delta > hi) hi = p.delta; }
+    const ptp = hi - lo;  // peak-to-peak pitch wobble (deg) over 500 ms
+    let label;
+    if (ptp < 0.15) label = 'STEADY';
+    else if (ptp < 0.4) label = 'GOOD HOLD';
+    else if (ptp < 0.8) label = 'FAIR HOLD';
+    else label = 'WOBBLY';
+    return { ptp, label };
+  }
+
   function computeShotFromPitch(pitchDelta_deg) {
     const clampedPitch = Math.max(-45, Math.min(45, pitchDelta_deg));
     const pitchRad = clampedPitch * Math.PI / 180;
@@ -789,6 +897,7 @@
     else grade = 'MISS';
 
     return {
+      mode: 'PITCH',
       pitchDelta: pitchDelta_deg,
       errorMm, score, grade,
       direction: errorMm >= 0 ? 'HIGH' : 'LOW'
@@ -798,13 +907,29 @@
   function showShotResult(shot) {
     shotScoreEl.textContent = shot.score.toFixed(1);
     shotGradeEl.textContent = shot.grade;
-    const absErr = Math.abs(shot.errorMm);
-    const distLabel = config.targetDistance.toFixed(1) + ' m';
-    if (absErr < 0.5) {
-      shotDeviationEl.innerHTML = '<b>DEAD CENTER</b> at ' + distLabel;
+
+    let html;
+    if (shot.mode === '2D') {
+      if (shot.offsetMm < 0.8) {
+        html = '<b>DEAD CENTER</b> · 2D';
+      } else {
+        const clockTxt = shot.clock ? (' · ' + shot.clock + ' o\u2032clock') : '';
+        html = '<b>' + shot.offsetMm.toFixed(1) + ' mm</b>' + clockTxt + ' · 2D';
+      }
+      if (shot.hold && shot.hold.label) {
+        html += '<br><span style="opacity:0.55">' + shot.hold.label + ' · ' +
+                shot.hold.ptp.toFixed(2) + '° wobble</span>';
+      }
     } else {
-      shotDeviationEl.innerHTML = '<b>' + absErr.toFixed(1) + ' mm ' + shot.direction + '</b> at ' + distLabel;
+      const distLabel = config.targetDistance.toFixed(1) + ' m';
+      const absErr = Math.abs(shot.errorMm);
+      if (absErr < 0.5) {
+        html = '<b>DEAD CENTER</b> at ' + distLabel + ' · pitch only';
+      } else {
+        html = '<b>' + absErr.toFixed(1) + ' mm ' + shot.direction + '</b> at ' + distLabel + ' · pitch only';
+      }
     }
+    shotDeviationEl.innerHTML = html;
     shotResultEl.className = 'show grade-' + shot.grade.toLowerCase();
     void shotResultEl.offsetWidth;
   }
@@ -1332,6 +1457,14 @@
     const alpha = 0.35;
     smoothedBeta = (smoothedBeta === null) ? rawBeta : smoothedBeta * (1 - alpha) + rawBeta * alpha;
     if (zeroBeta === null) zeroBeta = smoothedBeta;
+
+    // Append to pitch history & evict old entries
+    const now = performance.now();
+    pitchHistory.push({ t: now, delta: smoothedBeta - zeroBeta });
+    while (pitchHistory.length && now - pitchHistory[0].t > PITCH_HISTORY_MS) {
+      pitchHistory.shift();
+    }
+
     updatePitchDisplay();
     drawSights();
   }
@@ -1380,8 +1513,14 @@
   function fire() {
     if (isReplaying || !stream) return;
     isReplaying = true;
-    const pitchAtFire = isPitchLive() ? (smoothedBeta - zeroBeta) : null;
-    const shot = (pitchAtFire !== null) ? computeShotFromPitch(pitchAtFire) : null;
+
+    // Prefer 2D scoring against the locked target. Fall back to pitch-only.
+    let shot = computeShot2D();
+    if (shot) {
+      shot.hold = computeHoldQuality();
+    } else if (isPitchLive()) {
+      shot = computeShotFromPitch(smoothedBeta - zeroBeta);
+    }
 
     const vw = video.videoWidth, vh = video.videoHeight;
     if (vw && vh) {
@@ -1422,6 +1561,10 @@
     if (key === 'vPos' || key === 'opacity') el.textContent = val + '%';
     else if (key === 'hPos') el.textContent = val > 0 ? '+' + val : String(val);
     else if (key === 'sightRadius') el.textContent = val + ' cm';
+    else if (key === 'aimOffset') {
+      const sign = val < 0 ? '\u2212' : (val > 0 ? '+' : '');
+      el.textContent = sign + Math.abs(val) + ' mm';
+    }
     else el.textContent = val;
   }
 
@@ -1442,6 +1585,16 @@
     pitchToggle.checked = config.pitchEnabled;
     pitchToggle.onchange = () => { config.pitchEnabled = pitchToggle.checked; drawSights(); };
 
+    // Aim point offset
+    const aimEl = document.getElementById('aimOffset');
+    const aimValEl = document.getElementById('aimOffsetVal');
+    aimEl.value = config.aimOffsetMm;
+    updateValLabel('aimOffset', config.aimOffsetMm, aimValEl);
+    aimEl.oninput = () => {
+      config.aimOffsetMm = parseFloat(aimEl.value);
+      updateValLabel('aimOffset', config.aimOffsetMm, aimValEl);
+    };
+
     // Distance
     distanceInput.value = config.targetDistance.toFixed(1);
     updateDistanceLabel();
@@ -1461,8 +1614,9 @@
   }
 
   function resetSights() {
-    const keepDist = config.targetDistance; // don't reset the user-chosen distance
-    config = { ...defaults, targetDistance: keepDist };
+    const keepDist = config.targetDistance;
+    const keepAim = config.aimOffsetMm;
+    config = { ...defaults, targetDistance: keepDist, aimOffsetMm: keepAim };
     bindSettings();
     drawSights();
   }
