@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-<title>Air Pistol Sight Trainer v8</title>
+<title>Air Pistol Sight Trainer v9</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; }
   html, body { width: 100%; height: 100%; overflow: hidden; background: #000; color: #fff; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
@@ -574,7 +574,7 @@
       <div class="pill detect" id="detectPill" style="display:none"><span>DETECT</span><span class="pill-value" id="detectValue">—</span></div>
     </div>
     <div class="hud-right">
-      <button class="hud-btn" id="calibrateBtn" title="Calibrate level">⊕</button>
+      <button class="hud-btn" id="calibrateBtn" title="Calibrate &amp; lock target">⊕</button>
       <button class="hud-btn" id="resetBtn" title="Reset session">↺</button>
       <button class="hud-btn" id="settingsBtn" title="Settings">⚙</button>
     </div>
@@ -589,13 +589,16 @@
     </div>
 
     <div class="section-title">
-      TARGET DETECTION
+      AUTO-SETUP
       <span class="status-badge ok" id="detectLockBadge" style="display:none">LOCKED</span>
       <span class="status-badge warn" id="detectLostBadge" style="display:none">SEARCHING</span>
     </div>
-    <button class="btn-green" id="selectTargetBtn">◎ SELECT TARGET</button>
+    <button class="btn-primary" id="calibrateBtn2">⊕ CALIBRATE &amp; SELECT TARGET</button>
+    <div class="help-text">Get into your shooting stance, then tap to zero pitch &amp; yaw and pick the target. After tapping the button, tap the center of the black aiming area on your target.</div>
+
+    <button class="btn-green" id="selectTargetBtn">◎ RE-SELECT TARGET ONLY</button>
     <button class="btn-secondary" id="stopDetectBtn" style="display:none">STOP DETECTION</button>
-    <div class="help-text">Tap the button, then tap the center of the black aiming area on your target. Scoring requires a target lock.</div>
+    <div class="help-text">Skip re-zeroing the angles and just tap a new target center.</div>
 
     <div class="setting-row">
       <div class="setting-label">Aim point offset (sub-six hold) <span class="val" id="aimOffsetVal">−30 mm</span></div>
@@ -621,9 +624,12 @@
     <div class="preset-row" id="zoomPresets"></div>
     <div class="help-text">Pinch the camera view to zoom, or use the slider.</div>
 
-    <div class="section-title">PITCH &amp; YAW CALIBRATION</div>
-    <button class="btn-primary" id="calibrateBtn2">⊕ CALIBRATE LEVEL NOW</button>
-    <div class="help-text">Hold the phone exactly as you'd hold the pistol at the moment of release, then tap to zero both pitch (vertical) and yaw (horizontal) references.</div>
+    <div class="section-title">
+      MOTION SENSORS
+      <span class="status-badge ok" id="pitchOkBadge" style="display:none">PITCH</span>
+      <span class="status-badge ok" id="gyroOkBadge" style="display:none">GYRO</span>
+      <span class="status-badge no" id="gyroNoBadge" style="display:none">NO GYRO</span>
+    </div>
 
     <div class="toggle-row">
       <span>Enable pitch &amp; yaw simulation</span>
@@ -686,13 +692,12 @@
   <div id="startScreen">
     <div class="logo">▪ AIR PISTOL TRAINER ▪</div>
     <div class="title">Sight Picture Training</div>
-    <div class="version">v8 · 2D AIM &amp; AIR-PISTOL SOUND</div>
-    <div class="subtitle">Pitch + yaw move the front sight on both axes. Air-pistol-style shot sound. 2D scoring requires a target lock.</div>
+    <div class="version">v9 · GYRO YAW &amp; AUTO-SETUP</div>
+    <div class="subtitle">Smooth gyroscope-based horizontal aim. One-tap calibration plus target lock.</div>
     <button class="start-btn" id="startBtn">START CAMERA</button>
     <div class="instructions">
       Aim camera at target, <b>pinch</b> to zoom.<br>
-      Settings → <b>SELECT TARGET</b> → tap the center of the black.<br>
-      Tap <b>⊕</b> in your stance to zero both axes.<br>
+      Get into your stance, tap <b>⊕</b>, then tap the center of the black.<br>
       Tap <b>FIRE</b> at release. No score without target lock.
     </div>
     <div id="errorMsg"></div>
@@ -723,6 +728,15 @@
 
   const ANGLE_HISTORY_MS = 1000;
 
+  // Gyro bias estimation
+  const GYRO_BIAS_RATE_THRESHOLD = 5.0;   // deg/s — only update bias when slower than this
+  const GYRO_BIAS_TIME_CONST_S = 1.5;     // EMA time constant when stationary
+
+  // Sign convention for yaw integration. Per right-hand-rule analysis:
+  // positive rotationRate.gamma = phone yaws CCW from above = muzzle yaws LEFT.
+  // We want yawDelta > 0 to mean "yawed RIGHT", so we negate. Flip if a given device disagrees.
+  const YAW_RATE_SIGN = -1;
+
   // ===== Config & state =====
   const defaults = {
     vPos: 55, hPos: 0,
@@ -744,11 +758,19 @@
   let isReplaying = false;
   let overlayTimer = null;
 
-  // Orientation: pitch (beta) + yaw (alpha)
+  // Pitch (orientation, accelerometer-referenced — no drift)
   let zeroBeta = null, rawBeta = null, smoothedBeta = null;
-  let zeroAlpha = null, rawAlpha = null, smoothedAlpha = null;
   let orientationAttached = false;
-  const angleHistory = [];  // { t, pitch, yaw } samples
+
+  // Yaw (gyro-integrated)
+  let yawIntegrated = 0;
+  let yawZero = 0;
+  let yawBias = 0;            // deg/s, slow EMA when "stationary"
+  let lastMotionTime = null;
+  let motionAttached = false;
+  let gyroEverSampled = false;
+
+  const angleHistory = [];     // { t, pitch, yaw } samples for hold-quality
 
   // Zoom
   let zoomCaps = null, currentZoom = 1;
@@ -798,6 +820,9 @@
   const targetSvg = document.getElementById('targetSvg');
   const targetCaption = document.getElementById('targetCaption');
   const targetDismiss = document.getElementById('targetDismiss');
+  const pitchOkBadge = document.getElementById('pitchOkBadge');
+  const gyroOkBadge  = document.getElementById('gyroOkBadge');
+  const gyroNoBadge  = document.getElementById('gyroNoBadge');
 
   // ===== Angle helpers =====
 
@@ -807,17 +832,14 @@
     return smoothedBeta - zeroBeta;
   }
 
-  function getYawDelta() {
-    if (!config.pitchEnabled) return 0;
-    if (zeroAlpha === null || smoothedAlpha === null) return 0;
-    let d = smoothedAlpha - zeroAlpha;
-    while (d > 180) d -= 360;
-    while (d < -180) d += 360;
-    return -d; // positive = yawed right (alpha decreases when device yaws CW from above)
+  function isYawAvailable() {
+    return motionAttached && gyroEverSampled;
   }
 
-  function isPitchLive() {
-    return config.pitchEnabled && zeroBeta !== null && smoothedBeta !== null;
+  function getYawDelta() {
+    if (!config.pitchEnabled) return 0;
+    if (!isYawAvailable()) return 0;
+    return yawIntegrated - yawZero;
   }
 
   // ===== Scoring =====
@@ -864,7 +886,6 @@
     if (!det || !det.ok || !det.blackRadius) return null;
     const tip = getFrontSightTipScreen();
     if (!tip) return null;
-
     const mmPerPx = (BLACK_DIAMETER_MM / 2) / det.blackRadius;
     const dxPx = tip.x - det.cx;
     const dyPxDown = tip.y - det.cy;
@@ -874,7 +895,6 @@
     const impactDyMm = dyMmDown + config.aimOffsetMm;
     const distMm = Math.sqrt(impactDxMm * impactDxMm + impactDyMm * impactDyMm);
     const score = scoreFromMm(distMm);
-
     return {
       score,
       grade: gradeFromScore(score),
@@ -885,7 +905,6 @@
     };
   }
 
-  // Hold quality: combined pitch + yaw peak-to-peak over the last 500 ms
   function computeHoldQuality() {
     const now = performance.now();
     const recent = angleHistory.filter(p => now - p.t <= 500);
@@ -1066,7 +1085,9 @@
       document.getElementById('startScreen').style.display = 'none';
       fireBtn.disabled = false;
       setTimeout(drawSights, 100);
+      // Both sensor permission requests need a user gesture; the start-camera tap counts.
       attachOrientation();
+      attachMotion();
     } catch (err) {
       const msg = (err && err.message) ? err.message : String(err);
       document.getElementById('errorMsg').textContent =
@@ -1223,7 +1244,7 @@
   function startDetectionLoop() {
     detection.enabled = true;
     stopDetectBtn.style.display = '';
-    selectTargetBtn.textContent = '◎ RE-SELECT TARGET';
+    selectTargetBtn.textContent = '◎ RE-SELECT TARGET ONLY';
     detectPill.style.display = '';
     if (detection.loopId) return;
     detection.loopId = setInterval(runDetectionTick, DETECTION_INTERVAL_MS);
@@ -1236,7 +1257,7 @@
     detection.roiCenter = null;
     detection.failCount = 0;
     stopDetectBtn.style.display = 'none';
-    selectTargetBtn.textContent = '◎ SELECT TARGET';
+    selectTargetBtn.textContent = '◎ RE-SELECT TARGET ONLY';
     detectPill.style.display = 'none';
     detectLockBadge.style.display = 'none';
     detectLostBadge.style.display = 'none';
@@ -1375,7 +1396,7 @@
     return { ok: true, cx: cssCX, cy: cssCY, blackRadius: cssR, outerRadius: cssR * OUTER_RATIO, fillRatio };
   }
 
-  // ===== Orientation (pitch + yaw) =====
+  // ===== Pitch (DeviceOrientation, accelerometer-referenced) =====
 
   async function attachOrientation() {
     if (orientationAttached) return;
@@ -1390,34 +1411,74 @@
   }
 
   function handleOrientation(event) {
-    // Pitch (beta): always available on devices with accelerometer
-    if (event.beta !== null && event.beta !== undefined) {
-      rawBeta = event.beta;
-      const a = 0.35;
-      smoothedBeta = (smoothedBeta === null) ? rawBeta : smoothedBeta * (1 - a) + rawBeta * a;
-      if (zeroBeta === null) zeroBeta = smoothedBeta;
-    }
+    if (event.beta === null || event.beta === undefined) return;
+    rawBeta = event.beta;
+    const a = 0.35;
+    smoothedBeta = (smoothedBeta === null) ? rawBeta : smoothedBeta * (1 - a) + rawBeta * a;
+    if (zeroBeta === null) zeroBeta = smoothedBeta;
+    pitchOkBadge.style.display = 'inline-block';
+    updateAimDisplay();
+    drawSights();
+  }
 
-    // Yaw (alpha): may be null on devices without magnetometer or before
-    // the user grants compass-orientation permission. Smoothing must respect 0/360 wraparound.
-    if (event.alpha !== null && event.alpha !== undefined) {
-      rawAlpha = event.alpha;
-      const a = 0.35;
-      if (smoothedAlpha === null) {
-        smoothedAlpha = rawAlpha;
-      } else {
-        let diff = rawAlpha - smoothedAlpha;
-        while (diff > 180) diff -= 360;
-        while (diff < -180) diff += 360;
-        smoothedAlpha = smoothedAlpha + diff * a;
-        while (smoothedAlpha < 0)    smoothedAlpha += 360;
-        while (smoothedAlpha >= 360) smoothedAlpha -= 360;
+  // ===== Yaw (DeviceMotion gyroscope, integrated) =====
+
+  async function attachMotion() {
+    if (motionAttached) return;
+    try {
+      if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+        const response = await DeviceMotionEvent.requestPermission();
+        if (response !== 'granted') {
+          gyroNoBadge.style.display = 'inline-block';
+          return;
+        }
       }
-      if (zeroAlpha === null) zeroAlpha = smoothedAlpha;
+      window.addEventListener('devicemotion', handleMotion, true);
+      motionAttached = true;
+      // Show "no gyro" badge if we don't see any rotationRate samples within 1.5 s.
+      setTimeout(() => {
+        if (motionAttached && !gyroEverSampled) {
+          gyroNoBadge.style.display = 'inline-block';
+        }
+      }, 1500);
+    } catch (e) {
+      console.warn('DeviceMotion unavailable:', e);
+      gyroNoBadge.style.display = 'inline-block';
+    }
+  }
+
+  function handleMotion(event) {
+    const rr = event.rotationRate;
+    if (!rr || rr.gamma === null || rr.gamma === undefined) return;
+
+    if (!gyroEverSampled) {
+      gyroEverSampled = true;
+      gyroOkBadge.style.display = 'inline-block';
+      gyroNoBadge.style.display = 'none';
     }
 
     const now = performance.now();
-    angleHistory.push({ t: now, pitch: getPitchDelta(), yaw: getYawDelta() });
+    if (lastMotionTime === null) { lastMotionTime = now; return; }
+    const dt = (now - lastMotionTime) / 1000;
+    lastMotionTime = now;
+    if (dt <= 0 || dt > 0.5) return;  // skip after long pauses or invalid dt
+
+    const rawRate = rr.gamma;          // deg/s, around phone's y-axis
+
+    // Stationary-detection bias estimation. Update only when phone is roughly still,
+    // so real aiming rotations are not absorbed into the bias.
+    if (Math.abs(rawRate - yawBias) < GYRO_BIAS_RATE_THRESHOLD) {
+      const alpha = Math.min(1, dt / GYRO_BIAS_TIME_CONST_S);
+      yawBias = yawBias * (1 - alpha) + rawRate * alpha;
+    }
+
+    const correctedRate = rawRate - yawBias;
+    yawIntegrated += YAW_RATE_SIGN * correctedRate * dt;
+
+    // Append to angle history for hold-quality (uses latest known pitch).
+    const pitchNow = (smoothedBeta !== null && zeroBeta !== null) ? (smoothedBeta - zeroBeta) : 0;
+    const yawNow = yawIntegrated - yawZero;
+    angleHistory.push({ t: now, pitch: pitchNow, yaw: yawNow });
     while (angleHistory.length && now - angleHistory[0].t > ANGLE_HISTORY_MS) angleHistory.shift();
 
     updateAimDisplay();
@@ -1432,9 +1493,7 @@
   }
 
   function updateAimDisplay() {
-    const haveP = (zeroBeta  !== null && smoothedBeta  !== null);
-    const haveY = (zeroAlpha !== null && smoothedAlpha !== null);
-
+    const haveP = (zeroBeta !== null && smoothedBeta !== null);
     if (haveP) {
       const p = smoothedBeta - zeroBeta;
       const sign = p >= 0 ? '+' : '';
@@ -1445,8 +1504,8 @@
       pitchValueEl.className = 'aim-num';
     }
 
-    if (haveY) {
-      const y = getYawDelta();
+    if (isYawAvailable()) {
+      const y = yawIntegrated - yawZero;
       const sign = y >= 0 ? '+' : '';
       yawValueEl.textContent = sign + y.toFixed(1) + '°';
       yawValueEl.className = 'aim-num ' + classifyDeg(Math.abs(y));
@@ -1456,17 +1515,29 @@
     }
   }
 
-  function calibrateLevel() {
-    if (smoothedBeta === null) { attachOrientation(); return; }
-    zeroBeta = smoothedBeta;
-    if (smoothedAlpha !== null) zeroAlpha = smoothedAlpha;
+  // ===== Auto-setup: calibrate level, then enter tap mode =====
+
+  function autoSetup() {
+    // 1) Zero pitch: capture current smoothed beta if available.
+    if (smoothedBeta !== null) zeroBeta = smoothedBeta;
+
+    // 2) Zero yaw: snapshot current integrated yaw. If gyro hasn't sampled yet,
+    //    yawIntegrated is 0 and yawZero will be 0; integrated yaw will start
+    //    accumulating from the moment the first sample arrives.
+    yawZero = yawIntegrated;
+
     updateAimDisplay();
     drawSights();
-    ['calibrateBtn','calibrateBtn2'].forEach(id => {
+
+    // Visual confirmation flash on both buttons.
+    ['calibrateBtn', 'calibrateBtn2'].forEach(id => {
       const b = document.getElementById(id); if (!b) return;
       b.classList.add('ok-flash');
       setTimeout(() => b.classList.remove('ok-flash'), 400);
     });
+
+    // 3) Enter target tap mode.
+    enterTapMode();
   }
 
   // ===== Sound (air-pistol-style "thwop") =====
@@ -1481,7 +1552,6 @@
       master.gain.value = 1.0;
       master.connect(audioCtx.destination);
 
-      // Low body of the shot — sine sweep 280 → 55 Hz over ~120 ms with a quick attack.
       const osc = audioCtx.createOscillator();
       osc.type = 'sine';
       osc.frequency.setValueAtTime(280, t);
@@ -1490,12 +1560,9 @@
       oscGain.gain.setValueAtTime(0.0, t);
       oscGain.gain.linearRampToValueAtTime(0.45, t + 0.004);
       oscGain.gain.exponentialRampToValueAtTime(0.001, t + 0.16);
-      osc.connect(oscGain);
-      oscGain.connect(master);
-      osc.start(t);
-      osc.stop(t + 0.18);
+      osc.connect(oscGain); oscGain.connect(master);
+      osc.start(t); osc.stop(t + 0.18);
 
-      // Brief filtered-noise burst — the mechanism / spring click that precedes the body.
       const noiseDur = 0.025;
       const noiseSamples = Math.floor(audioCtx.sampleRate * noiseDur);
       const noiseBuf = audioCtx.createBuffer(1, noiseSamples, audioCtx.sampleRate);
@@ -1510,9 +1577,7 @@
       const noiseGain = audioCtx.createGain();
       noiseGain.gain.setValueAtTime(0.18, t);
       noiseGain.gain.exponentialRampToValueAtTime(0.001, t + noiseDur);
-      noiseSrc.connect(noiseFilter);
-      noiseFilter.connect(noiseGain);
-      noiseGain.connect(master);
+      noiseSrc.connect(noiseFilter); noiseFilter.connect(noiseGain); noiseGain.connect(master);
       noiseSrc.start(t);
     } catch (e) { /* silent */ }
   }
@@ -1524,7 +1589,7 @@
     lockHint.classList.add('show');
     lockHintTimer = setTimeout(() => lockHint.classList.remove('show'), 1200);
     fireBtn.classList.remove('shake');
-    void fireBtn.offsetWidth; // restart animation
+    void fireBtn.offsetWidth;
     fireBtn.classList.add('shake');
     setTimeout(() => fireBtn.classList.remove('shake'), 320);
   }
@@ -1534,7 +1599,6 @@
 
     const shot = computeShot2D();
     if (!shot) {
-      // No target lock — abort with a hint, no sound, no shot recorded.
       showLockHint();
       return;
     }
@@ -1634,15 +1698,18 @@
     if (confirm('Reset session — clears shot counter, average, and shot marks. Continue?')) resetSession();
   });
   document.getElementById('resetSights').addEventListener('click', resetSights);
-  document.getElementById('calibrateBtn').addEventListener('click', calibrateLevel);
-  document.getElementById('calibrateBtn2').addEventListener('click', calibrateLevel);
 
-  zoomSlider.addEventListener('input', () => applyZoom(parseFloat(zoomSlider.value)));
-  zoomPill.addEventListener('click', resetZoom);
+  // Auto-setup: ⊕ (HUD) and the calibrate button in settings both run the full sequence.
+  document.getElementById('calibrateBtn').addEventListener('click', autoSetup);
+  document.getElementById('calibrateBtn2').addEventListener('click', autoSetup);
 
+  // Re-select target only (no re-zeroing).
   selectTargetBtn.addEventListener('click', enterTapMode);
   stopDetectBtn.addEventListener('click', stopDetectionLoop);
   detectPill.addEventListener('click', enterTapMode);
+
+  zoomSlider.addEventListener('input', () => applyZoom(parseFloat(zoomSlider.value)));
+  zoomPill.addEventListener('click', resetZoom);
 
   targetDismiss.addEventListener('click', hideTargetOverlay);
 
