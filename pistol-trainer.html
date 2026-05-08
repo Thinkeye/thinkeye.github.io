@@ -594,7 +594,7 @@
       <span class="status-badge warn" id="detectLostBadge" style="display:none">SEARCHING</span>
     </div>
     <button class="btn-primary" id="calibrateBtn2">⊕ CALIBRATE &amp; SELECT TARGET</button>
-    <div class="help-text">Get into your shooting stance, then tap to zero pitch &amp; yaw and pick the target. After tapping the button, tap the center of the black aiming area on your target.</div>
+    <div class="help-text">Get into your shooting stance, tap the button, then tap the center of the black on your target. Pitch and yaw are zeroed at the moment you tap the target — when you're fully committed to the stance.</div>
 
     <button class="btn-green" id="selectTargetBtn">◎ RE-SELECT TARGET ONLY</button>
     <button class="btn-secondary" id="stopDetectBtn" style="display:none">STOP DETECTION</button>
@@ -640,7 +640,13 @@
       <div class="setting-label">Sight radius (pistol length) <span class="val" id="sightRadiusVal">36 cm</span></div>
       <input type="range" id="sightRadius" min="15" max="60" value="36" step="1">
     </div>
-    <div class="help-text">Distance between rear and front sight. Longer radius = more visible angle effect on the sights.</div>
+    <div class="help-text">Distance between rear and front sight. Used together with target distance to amplify sight misalignment into pellet error.</div>
+
+    <div class="setting-row">
+      <div class="setting-label">Target distance <span class="val" id="distanceVal">10.0 m</span></div>
+      <input type="range" id="distance" min="1" max="25" step="0.5" value="10">
+    </div>
+    <div class="help-text">Range to the target (1–25 m). Default 10 m for ISSF air pistol. Combined with pistol length to scale shot deviation: a pellet error grows as <i>D / S_R</i> — about 28× at 10 m / 36 cm.</div>
 
     <div class="section-title">POSITION</div>
     <div class="setting-row">
@@ -692,8 +698,8 @@
   <div id="startScreen">
     <div class="logo">▪ AIR PISTOL TRAINER ▪</div>
     <div class="title">Sight Picture Training</div>
-    <div class="version">v9 · GYRO YAW &amp; AUTO-SETUP</div>
-    <div class="subtitle">Smooth gyroscope-based horizontal aim. One-tap calibration plus target lock.</div>
+    <div class="version">v10 · WHOLE-PISTOL AIM</div>
+    <div class="subtitle">Bore-line scoring through both sights, distance-aware. Calibration locks in at the target tap.</div>
     <button class="start-btn" id="startBtn">START CAMERA</button>
     <div class="instructions">
       Aim camera at target, <b>pinch</b> to zoom.<br>
@@ -791,6 +797,10 @@
 
   let lockHintTimer = null;
 
+  // Auto-setup pending state: when the user taps ⊕, we defer the angle
+  // zeroing until they actually tap the target (committed stance).
+  let pendingAutoCalibrate = false;
+
   // ===== DOM refs =====
   const video = document.getElementById('video');
   const svgSights = document.getElementById('sightOverlay');
@@ -885,17 +895,53 @@
   function computeShot2D() {
     const det = detection.lastResult;
     if (!det || !det.ok || !det.blackRadius) return null;
-    const tip = getFrontSightTipScreen();
-    if (!tip) return null;
+
+    // Rear sight position on screen (the user-set anchor).
+    const w = svgSights.clientWidth;
+    const h = svgSights.clientHeight;
+    if (!w || !h) return null;
+    const rearX = w / 2 + (config.hPos / 100) * w;
+    const rearY = (config.vPos / 100) * h;
+
+    // Real-world scale derived from the detected black aiming area.
     const mmPerPx = (BLACK_DIAMETER_MM / 2) / det.blackRadius;
-    const dxPx = tip.x - det.cx;
-    const dyPxDown = tip.y - det.cy;
-    const dxMm = dxPx * mmPerPx;
-    const dyMmDown = dyPxDown * mmPerPx;
-    const impactDxMm = dxMm;
+
+    // Whole-pistol model: pistol pivots around the rear sight.
+    // For pitch p and yaw y (degrees), the front-sight pin physically moves by
+    //   dx_real = +S_R · tan(yaw),   dy_real = -S_R · tan(pitch)   (mm)
+    // We project that displacement onto the screen using the target-plane scale.
+    const sightRadiusMm = config.sightRadius * 10;     // cm -> mm
+    const targetDistMm  = config.targetDistance * 1000;
+    const pitchRad = getPitchDelta() * Math.PI / 180;
+    const yawRad   = getYawDelta()   * Math.PI / 180;
+
+    const frontDxMm = sightRadiusMm * Math.tan(yawRad);
+    const frontDyMm = -sightRadiusMm * Math.tan(pitchRad);
+
+    // Front sight on screen = rear + (frontDx_mm, frontDy_mm) / mmPerPx
+    const frontX = rearX + frontDxMm / mmPerPx;
+    const frontY = rearY + frontDyMm / mmPerPx;
+
+    // Bore line: from rear through front, extrapolated to target distance.
+    // The pellet impact point on screen sits at:
+    //   impact = rear + (front - rear) * (D_T / S_R)
+    const k = targetDistMm / sightRadiusMm;
+    const impactX = rearX + (frontX - rearX) * k;
+    const impactY = rearY + (frontY - rearY) * k;
+
+    // Convert to mm at the target plane.
+    const dxMmRaw  = (impactX - det.cx) * mmPerPx;
+    const dyMmDown = (impactY - det.cy) * mmPerPx;
+
+    // Apply user's aim-point offset (sub-six hold convention: aim point
+    // sits below the intended impact, so a negative aimOffsetMm shifts
+    // the impact UP relative to the rear-anchored bore line).
+    const impactDxMm = dxMmRaw;
     const impactDyMm = dyMmDown + config.aimOffsetMm;
+
     const distMm = Math.sqrt(impactDxMm * impactDxMm + impactDyMm * impactDyMm);
     const score = scoreFromMm(distMm);
+
     return {
       score,
       grade: gradeFromScore(score),
@@ -1219,6 +1265,14 @@
   }
   function handleSingleTap(x, y) {
     if (detection.tapMode) {
+      // If the user invoked auto-setup, this tap is the moment to zero the
+      // angles — they're locked into their stance now.
+      if (pendingAutoCalibrate) {
+        if (smoothedBeta !== null) zeroBeta = smoothedBeta;
+        yawZero = yawIntegrated;
+        pendingAutoCalibrate = false;
+        updateAimDisplay();
+      }
       detection.targetTap = { x, y };
       detection.roiCenter = { x, y };
       detection.failCount = 0;
@@ -1516,19 +1570,10 @@
     }
   }
 
-  // ===== Auto-setup: calibrate level, then enter tap mode =====
+  // ===== Auto-setup: defer angle zeroing until the target tap =====
 
   function autoSetup() {
-    // 1) Zero pitch: capture current smoothed beta if available.
-    if (smoothedBeta !== null) zeroBeta = smoothedBeta;
-
-    // 2) Zero yaw: snapshot current integrated yaw. If gyro hasn't sampled yet,
-    //    yawIntegrated is 0 and yawZero will be 0; integrated yaw will start
-    //    accumulating from the moment the first sample arrives.
-    yawZero = yawIntegrated;
-
-    updateAimDisplay();
-    drawSights();
+    pendingAutoCalibrate = true;
 
     // Visual confirmation flash on both buttons.
     ['calibrateBtn', 'calibrateBtn2'].forEach(id => {
@@ -1537,7 +1582,14 @@
       setTimeout(() => b.classList.remove('ok-flash'), 400);
     });
 
-    // 3) Enter target tap mode.
+    // Enter target tap mode immediately. Angles will be zeroed when the user
+    // taps the target (a fully-committed stance reference).
+    enterTapMode();
+  }
+
+  // "Re-select target only" path explicitly does NOT recalibrate angles.
+  function reselectTargetOnly() {
+    pendingAutoCalibrate = false;
     enterTapMode();
   }
 
@@ -1632,6 +1684,7 @@
     if (key === 'vPos' || key === 'opacity') el.textContent = val + '%';
     else if (key === 'hPos') el.textContent = val > 0 ? '+' + val : String(val);
     else if (key === 'sightRadius') el.textContent = val + ' cm';
+    else if (key === 'distance') el.textContent = parseFloat(val).toFixed(1) + ' m';
     else if (key === 'aimOffset') {
       const sign = val < 0 ? '\u2212' : (val > 0 ? '+' : '');
       el.textContent = sign + Math.abs(val) + ' mm';
@@ -1657,6 +1710,16 @@
     pitchToggle.checked = config.pitchEnabled;
     pitchToggle.onchange = () => { config.pitchEnabled = pitchToggle.checked; drawSights(); };
 
+    // Distance slider (used by whole-pistol scoring)
+    const distEl = document.getElementById('distance');
+    const distValEl = document.getElementById('distanceVal');
+    distEl.value = config.targetDistance;
+    updateValLabel('distance', config.targetDistance, distValEl);
+    distEl.oninput = () => {
+      config.targetDistance = parseFloat(distEl.value);
+      updateValLabel('distance', config.targetDistance, distValEl);
+    };
+
     const aimEl = document.getElementById('aimOffset');
     const aimValEl = document.getElementById('aimOffsetVal');
     aimEl.value = config.aimOffsetMm;
@@ -1679,7 +1742,8 @@
   function resetSights() {
     const keepAim = config.aimOffsetMm;
     const keepOverlay = config.overlayDurSec;
-    config = { ...defaults, aimOffsetMm: keepAim, overlayDurSec: keepOverlay };
+    const keepDist = config.targetDistance;
+    config = { ...defaults, aimOffsetMm: keepAim, overlayDurSec: keepOverlay, targetDistance: keepDist };
     bindSettings();
     drawSights();
   }
@@ -1705,9 +1769,9 @@
   document.getElementById('calibrateBtn2').addEventListener('click', autoSetup);
 
   // Re-select target only (no re-zeroing).
-  selectTargetBtn.addEventListener('click', enterTapMode);
+  selectTargetBtn.addEventListener('click', reselectTargetOnly);
   stopDetectBtn.addEventListener('click', stopDetectionLoop);
-  detectPill.addEventListener('click', enterTapMode);
+  detectPill.addEventListener('click', reselectTargetOnly);
 
   zoomSlider.addEventListener('input', () => applyZoom(parseFloat(zoomSlider.value)));
   zoomPill.addEventListener('click', resetZoom);
