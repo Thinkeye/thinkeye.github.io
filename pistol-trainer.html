@@ -648,6 +648,25 @@
     </div>
     <div class="help-text">Range to the target (1–25 m). Default 10 m for ISSF air pistol. Combined with pistol length to scale shot deviation: a pellet error grows as <i>D / S_R</i> — about 28× at 10 m / 36 cm.</div>
 
+    <div class="section-title">AIM FEEL</div>
+    <div class="setting-row">
+      <div class="setting-label">Yaw sensitivity <span class="val" id="yawScaleVal">50%</span></div>
+      <input type="range" id="yawScale" min="0.1" max="1.0" step="0.05" value="0.5">
+    </div>
+    <div class="help-text">Scales the horizontal yaw effect on both visuals and scoring. Lower values dampen sideways wobble; 100% is one-to-one with the gyro.</div>
+
+    <div class="setting-row">
+      <div class="setting-label">Aim smoothing <span class="val" id="aimSmoothingVal">60%</span></div>
+      <input type="range" id="aimSmoothing" min="0" max="0.95" step="0.05" value="0.6">
+    </div>
+    <div class="help-text">EMA filter on both pitch and yaw deltas. Higher = smoother but more delayed. Affects sights, scoring, and hold-quality consistently.</div>
+
+    <div class="toggle-row">
+      <span>Soft-contain front sight near rear</span>
+      <label class="switch"><input type="checkbox" id="sightContainment" checked><span class="slider-sw"></span></label>
+    </div>
+    <div class="help-text">Visual only: keeps the front sight near the rear sight area using a soft (tanh) cap. Scoring still uses unconstrained physics.</div>
+
     <div class="section-title">POSITION</div>
     <div class="setting-row">
       <div class="setting-label">Vertical position <span class="val" id="vPosVal">55%</span></div>
@@ -698,8 +717,8 @@
   <div id="startScreen">
     <div class="logo">▪ AIR PISTOL TRAINER ▪</div>
     <div class="title">Sight Picture Training</div>
-    <div class="version">v10 · WHOLE-PISTOL AIM</div>
-    <div class="subtitle">Bore-line scoring through both sights, distance-aware. Calibration locks in at the target tap.</div>
+    <div class="version">v12 · BACK BUTTON SUPPORT</div>
+    <div class="subtitle">Phone back button now closes overlays instead of exiting the app.</div>
     <button class="start-btn" id="startBtn">START CAMERA</button>
     <div class="instructions">
       Aim camera at target, <b>pinch</b> to zoom.<br>
@@ -753,7 +772,10 @@
     pitchEnabled: true,
     aimOffsetMm: -30,
     overlayDurSec: 2.0,
-    targetDistance: 10  // meters — used by whole-pistol scoring
+    targetDistance: 10,    // meters — used by whole-pistol scoring
+    yawScale: 0.5,         // visual + scoring scale on yaw delta (0.1..1.0)
+    aimSmoothing: 0.6,     // EMA factor for sight smoothing (0=none, 0.95=very smooth)
+    sightContainment: true // soft-cap front sight near rear sight on screen
   };
   let config = { ...defaults };
 
@@ -776,6 +798,13 @@
   let lastMotionTime = null;
   let motionAttached = false;
   let gyroEverSampled = false;
+
+  // Smoothed delta values that actually drive the sights and scoring.
+  // These EMA-track the raw deltas to suppress sensor jitter.
+  // (yawScale is applied INSIDE the smoothed value so smoothing acts on the
+  // already-scaled signal — same effective time constant regardless of scale.)
+  let smoothedPitchDelta = 0;
+  let smoothedYawDelta = 0;
 
   const angleHistory = [];     // { t, pitch, yaw } samples for hold-quality
 
@@ -800,6 +829,53 @@
   // Auto-setup pending state: when the user taps ⊕, we defer the angle
   // zeroing until they actually tap the target (committed stance).
   let pendingAutoCalibrate = false;
+
+  // ===== Overlay back-stack =====
+  // Maps each dismissible overlay to a closer. When opened, we push a
+  // synthetic history entry tagged with this name. The popstate handler
+  // closes the topmost open overlay instead of letting the browser navigate
+  // away from the app.
+  const overlayClosers = {
+    settings:      () => closeSettingsNoPop(),
+    tapMode:       () => exitTapModeNoPop(),
+    targetOverlay: () => hideTargetOverlayNoPop()
+  };
+  const overlayStack = [];      // names of overlays currently open, in open-order
+  let suppressPopstate = false; // true while we ourselves call history.back()
+
+  function pushOverlay(name) {
+    if (overlayStack.includes(name)) return; // idempotent
+    overlayStack.push(name);
+    history.pushState({ overlay: name }, '');
+  }
+
+  // Called when the in-app close control fires. Consumes the back-stack
+  // entry without invoking the closer again (the caller already closed it).
+  function consumeOverlayBack(name) {
+    const idx = overlayStack.lastIndexOf(name);
+    if (idx === -1) return;
+    overlayStack.splice(idx, 1);
+    suppressPopstate = true;
+    history.back();
+  }
+
+  window.addEventListener('popstate', () => {
+    if (suppressPopstate) {
+      suppressPopstate = false;
+      return;
+    }
+    // Browser back pressed with at least one overlay open: close topmost.
+    if (overlayStack.length > 0) {
+      const name = overlayStack.pop();
+      const closer = overlayClosers[name];
+      if (closer) closer();
+      // Replace the state we just popped off so a *future* back press still
+      // has somewhere to go (otherwise back becomes a no-op).
+      // We DON'T pushState here — we just let the now-current entry remain
+      // as the "app root". A second back press at this point will exit the
+      // app, which is the user's expectation.
+    }
+  });
 
   // ===== DOM refs =====
   const video = document.getElementById('video');
@@ -837,6 +913,8 @@
 
   // ===== Angle helpers =====
 
+  // Raw (calibrated) deltas — for the HUD's AIM pill so the user sees the
+  // unfiltered sensor reading.
   function getPitchDelta() {
     if (!config.pitchEnabled) return 0;
     if (zeroBeta === null || smoothedBeta === null) return 0;
@@ -851,6 +929,22 @@
     if (!config.pitchEnabled) return 0;
     if (!isYawAvailable()) return 0;
     return yawIntegrated - yawZero;
+  }
+
+  // Effective deltas — smoothed and (for yaw) scaled. These drive sight
+  // rendering, scoring, and hold-quality. EMA is updated continuously by
+  // the orientation/motion handlers (not here — here we just read).
+  function getEffectivePitch() { return smoothedPitchDelta; }
+  function getEffectiveYaw()   { return smoothedYawDelta;   }
+
+  // Update EMA from raw -> smoothed deltas. Call on every sensor sample.
+  // Factor 0 = no smoothing (instant), 1 = infinitely smooth (frozen).
+  function updateSmoothedDeltas() {
+    const rawP = getPitchDelta();
+    const rawY = getYawDelta() * config.yawScale;
+    const f = Math.max(0, Math.min(0.98, config.aimSmoothing));
+    smoothedPitchDelta = smoothedPitchDelta * f + rawP * (1 - f);
+    smoothedYawDelta   = smoothedYawDelta   * f + rawY * (1 - f);
   }
 
   // ===== Scoring =====
@@ -912,8 +1006,8 @@
     // We project that displacement onto the screen using the target-plane scale.
     const sightRadiusMm = config.sightRadius * 10;     // cm -> mm
     const targetDistMm  = config.targetDistance * 1000;
-    const pitchRad = getPitchDelta() * Math.PI / 180;
-    const yawRad   = getYawDelta()   * Math.PI / 180;
+    const pitchRad = getEffectivePitch() * Math.PI / 180;
+    const yawRad   = getEffectiveYaw()   * Math.PI / 180;
 
     const frontDxMm = sightRadiusMm * Math.tan(yawRad);
     const frontDyMm = -sightRadiusMm * Math.tan(pitchRad);
@@ -1036,11 +1130,18 @@
     targetCaption.innerHTML = captionHtml;
     targetCaption.className = grade;
     targetOverlay.classList.add('show');
+    pushOverlay('targetOverlay');
     if (overlayTimer) { clearTimeout(overlayTimer); overlayTimer = null; }
     overlayTimer = setTimeout(hideTargetOverlay, config.overlayDurSec * 1000);
   }
 
   function hideTargetOverlay() {
+    if (!targetOverlay.classList.contains('show')) return;
+    hideTargetOverlayNoPop();
+    consumeOverlayBack('targetOverlay');
+  }
+
+  function hideTargetOverlayNoPop() {
     if (overlayTimer) { clearTimeout(overlayTimer); overlayTimer = null; }
     targetOverlay.classList.remove('show');
     isReplaying = false;
@@ -1067,8 +1168,22 @@
     const topY = cy, bottomY = topY + rearH, baseTopY = bottomY - baseH;
 
     const gainPerDeg = 0.03 * (config.sightRadius / 36) * h;
-    const frontOffsetY = -getPitchDelta() * gainPerDeg;
-    const frontOffsetX =  getYawDelta()   * gainPerDeg;
+    let rawOffsetY = -getEffectivePitch() * gainPerDeg;
+    let rawOffsetX =  getEffectiveYaw()   * gainPerDeg;
+
+    // Soft containment: keep the on-screen front sight near the rear sight
+    // so it stays useful as visual feedback at large physical angles.
+    // The scoring math (whole-pistol bore-line) remains unconstrained.
+    if (config.sightContainment) {
+      // Horizontal cap = a bit wider than the notch so the front sight can
+      // visibly leave the notch but not escape the rear sight's neighbourhood.
+      const capX = rearW * 0.8;   // roughly 80% of rear sight width either side
+      const capY = rearH * 2.5;   // generous vertical so the user still sees real pitch
+      rawOffsetX = capX * Math.tanh(rawOffsetX / capX);
+      rawOffsetY = capY * Math.tanh(rawOffsetY / capY);
+    }
+    const frontOffsetX = rawOffsetX;
+    const frontOffsetY = rawOffsetY;
 
     const rearPath = [
       'M ' + (cx - rearW/2) + ' ' + topY,
@@ -1288,12 +1403,30 @@
   // ===== Detection =====
 
   function enterTapMode() {
+    if (detection.tapMode) return;
     detection.tapMode = true;
     tapHint.classList.add('show');
-    document.getElementById('settings').classList.remove('open');
+    // Close settings WITHOUT touching the back-stack — we'll let the settings
+    // entry stay there if it was the user's path in. Simpler: if settings is
+    // open, consume its back entry first so tap-mode sits cleanly on top.
+    if (overlayStack[overlayStack.length - 1] === 'settings') {
+      closeSettingsNoPop();
+      consumeOverlayBack('settings');
+    } else {
+      document.getElementById('settings').classList.remove('open');
+    }
+    pushOverlay('tapMode');
   }
+
   function exitTapMode() {
+    if (!detection.tapMode) return;
+    exitTapModeNoPop();
+    consumeOverlayBack('tapMode');
+  }
+
+  function exitTapModeNoPop() {
     detection.tapMode = false;
+    pendingAutoCalibrate = false; // back press cancels pending calibration
     tapHint.classList.remove('show');
   }
   function startDetectionLoop() {
@@ -1472,6 +1605,7 @@
     smoothedBeta = (smoothedBeta === null) ? rawBeta : smoothedBeta * (1 - a) + rawBeta * a;
     if (zeroBeta === null) zeroBeta = smoothedBeta;
     pitchOkBadge.style.display = 'inline-block';
+    updateSmoothedDeltas();
     updateAimDisplay();
     drawSights();
   }
@@ -1530,10 +1664,11 @@
     const correctedRate = rawRate - yawBias;
     yawIntegrated += YAW_RATE_SIGN * correctedRate * dt;
 
-    // Append to angle history for hold-quality (uses latest known pitch).
-    const pitchNow = (smoothedBeta !== null && zeroBeta !== null) ? (smoothedBeta - zeroBeta) : 0;
-    const yawNow = yawIntegrated - yawZero;
-    angleHistory.push({ t: now, pitch: pitchNow, yaw: yawNow });
+    updateSmoothedDeltas();
+
+    // Append to angle history for hold-quality. Use the effective (smoothed,
+    // scaled) values — that's what the user feels and sees.
+    angleHistory.push({ t: now, pitch: getEffectivePitch(), yaw: getEffectiveYaw() });
     while (angleHistory.length && now - angleHistory[0].t > ANGLE_HISTORY_MS) angleHistory.shift();
 
     updateAimDisplay();
@@ -1690,6 +1825,9 @@
       el.textContent = sign + Math.abs(val) + ' mm';
     }
     else if (key === 'overlayDur') el.textContent = parseFloat(val).toFixed(1) + ' s';
+    else if (key === 'yawScale' || key === 'aimSmoothing') {
+      el.textContent = Math.round(parseFloat(val) * 100) + '%';
+    }
     else el.textContent = val;
   }
 
@@ -1720,6 +1858,32 @@
       updateValLabel('distance', config.targetDistance, distValEl);
     };
 
+    // Yaw sensitivity
+    const yawScaleEl = document.getElementById('yawScale');
+    const yawScaleValEl = document.getElementById('yawScaleVal');
+    yawScaleEl.value = config.yawScale;
+    updateValLabel('yawScale', config.yawScale, yawScaleValEl);
+    yawScaleEl.oninput = () => {
+      config.yawScale = parseFloat(yawScaleEl.value);
+      updateValLabel('yawScale', config.yawScale, yawScaleValEl);
+      // Re-derive smoothed deltas at the next sensor sample; no immediate force.
+    };
+
+    // Aim smoothing
+    const smEl = document.getElementById('aimSmoothing');
+    const smValEl = document.getElementById('aimSmoothingVal');
+    smEl.value = config.aimSmoothing;
+    updateValLabel('aimSmoothing', config.aimSmoothing, smValEl);
+    smEl.oninput = () => {
+      config.aimSmoothing = parseFloat(smEl.value);
+      updateValLabel('aimSmoothing', config.aimSmoothing, smValEl);
+    };
+
+    // Containment toggle
+    const containEl = document.getElementById('sightContainment');
+    containEl.checked = config.sightContainment;
+    containEl.onchange = () => { config.sightContainment = containEl.checked; drawSights(); };
+
     const aimEl = document.getElementById('aimOffset');
     const aimValEl = document.getElementById('aimOffsetVal');
     aimEl.value = config.aimOffsetMm;
@@ -1743,7 +1907,17 @@
     const keepAim = config.aimOffsetMm;
     const keepOverlay = config.overlayDurSec;
     const keepDist = config.targetDistance;
-    config = { ...defaults, aimOffsetMm: keepAim, overlayDurSec: keepOverlay, targetDistance: keepDist };
+    const keepYawScale = config.yawScale;
+    const keepSmooth = config.aimSmoothing;
+    const keepContain = config.sightContainment;
+    config = { ...defaults,
+      aimOffsetMm: keepAim,
+      overlayDurSec: keepOverlay,
+      targetDistance: keepDist,
+      yawScale: keepYawScale,
+      aimSmoothing: keepSmooth,
+      sightContainment: keepContain
+    };
     bindSettings();
     drawSights();
   }
@@ -1754,10 +1928,16 @@
   fireBtn.addEventListener('click', fire);
   document.getElementById('settingsBtn').addEventListener('click', () => {
     document.getElementById('settings').classList.add('open');
+    pushOverlay('settings');
   });
   document.getElementById('closeSettings').addEventListener('click', () => {
-    document.getElementById('settings').classList.remove('open');
+    closeSettingsNoPop();
+    consumeOverlayBack('settings');
   });
+
+  function closeSettingsNoPop() {
+    document.getElementById('settings').classList.remove('open');
+  }
   document.getElementById('resetBtn').addEventListener('click', () => {
     if (shotCount === 0) return;
     if (confirm('Reset session — clears shot counter, average, and shot marks. Continue?')) resetSession();
